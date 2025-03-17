@@ -1731,44 +1731,80 @@ class HTML5Renderer:
     
     def _render_element(self, layout_box: LayoutBox, x_offset: int = 0, y_offset: int = 0) -> None:
         """
-        Render an element and its children.
+        Render a layout box and its children.
         
         Args:
-            layout_box: The layout box to render.
-            x_offset: The x offset to apply to the rendering.
-            y_offset: The y offset to apply to the rendering.
+            layout_box: The layout box to render
+            x_offset: X offset for positioning
+            y_offset: Y offset for positioning
         """
-        if not layout_box:
-            logger.debug("Skipping rendering for null layout box")
+        if not layout_box or not layout_box.element:
             return
             
-        # Get element from layout box
-        element = layout_box.element
+        tag_name = layout_box.element.tag_name.lower() if hasattr(layout_box.element, 'tag_name') else 'unknown'
         
-        # Skip rendering if element is None
-        if not element:
-            logger.debug("Skipping rendering for layout box with no element")
-            return
-            
-        # Get element tag if available
-        tag_name = element.tag_name.lower() if hasattr(element, 'tag_name') else "unknown"
-        element_id = element.id if hasattr(element, 'id') and element.id else "no-id"
-        logger.debug(f"Rendering element: {tag_name}#{element_id}")
-            
+        # Calculate dimensions safely
+        try:
+            # Calculate width
+            if isinstance(layout_box.box_metrics.content_width, (int, float)):
+                width = layout_box.box_metrics.content_width
+            elif isinstance(layout_box.box_metrics.content_width, str):
+                if layout_box.box_metrics.content_width == 'auto':
+                    # For auto width, use parent's width minus padding and borders
+                    if layout_box.parent:
+                        parent_width = layout_box.parent.box_metrics.content_width
+                        if isinstance(parent_width, (int, float)):
+                            width = parent_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right - layout_box.box_metrics.border_left_width - layout_box.box_metrics.border_right_width
+                        else:
+                            width = self.viewport_width * 0.8  # Default to 80% of viewport
+                    else:
+                        width = self.viewport_width * 0.8  # Default to 80% of viewport
+                else:
+                    try:
+                        width = int(layout_box.box_metrics.content_width)
+                    except (ValueError, TypeError):
+                        width = self.viewport_width * 0.8  # Default to 80% of viewport
+            else:
+                width = self.viewport_width * 0.8  # Default to 80% of viewport
+
+            # Calculate height
+            if isinstance(layout_box.box_metrics.content_height, (int, float)):
+                height = layout_box.box_metrics.content_height
+            elif isinstance(layout_box.box_metrics.content_height, str):
+                if layout_box.box_metrics.content_height == 'auto':
+                    # For auto height, calculate based on content or use aspect ratio
+                    if layout_box.children:
+                        # Calculate based on children's total height
+                        total_height = 0
+                        for child in layout_box.children:
+                            if isinstance(child.box_metrics.margin_box_height, (int, float)):
+                                total_height += child.box_metrics.margin_box_height
+                        height = total_height if total_height > 0 else int(width * 0.6)  # Use aspect ratio if no height
+                    else:
+                        height = int(width * 0.6)  # Default aspect ratio
+                else:
+                    try:
+                        height = int(layout_box.box_metrics.content_height)
+                    except (ValueError, TypeError):
+                        height = int(width * 0.6)  # Default aspect ratio
+            else:
+                height = int(width * 0.6)  # Default aspect ratio
+        except Exception as e:
+            logger.error(f"Error calculating dimensions: {e}")
+            # Use safe defaults
+            width = self.viewport_width * 0.8
+            height = int(width * 0.6)
+        
         # Get box metrics
         if hasattr(layout_box, 'box_metrics'):
             x = layout_box.box_metrics.x + x_offset
             y = layout_box.box_metrics.y + y_offset
-            width = layout_box.box_metrics.content_width
-            height = layout_box.box_metrics.content_height
             
             # Log box metrics for debugging
             logger.debug(f"Box metrics for {tag_name}: x={x}, y={y}, width={width}, height={height}")
         else:
             x = getattr(layout_box, 'x', 0) + x_offset
             y = getattr(layout_box, 'y', 0) + y_offset
-            width = getattr(layout_box, 'width', 0)
-            height = getattr(layout_box, 'height', 0)
             logger.debug(f"Using fallback positioning for {tag_name}: x={x}, y={y}, width={width}, height={height}")
             
         # Get computed style
@@ -1791,45 +1827,6 @@ class HTML5Renderer:
         
         # Render the element's content
         self._render_element_content(layout_box, x, y, width, height)
-        
-        # Add debug outline in debug mode
-        if self.is_debug_mode:
-            try:
-                # Ensure width and height are integers
-                width_int = int(width) if isinstance(width, (int, float)) else 0
-                height_int = int(height) if isinstance(height, (int, float)) else 0
-                
-                # Add a debug outline
-                if width_int > 0 and height_int > 0:
-                    outline_color = {
-                        'div': 'blue',
-                        'p': 'green',
-                        'h1': 'purple',
-                        'h2': 'purple',
-                        'h3': 'purple',
-                        'body': 'red',
-                        'html': 'orange'
-                    }.get(tag_name, 'gray')
-                    
-                    outline = self.canvas.create_rectangle(
-                        x, y, x + width_int, y + height_int,
-                        outline=outline_color,
-                        width=1,
-                        tags=f'debug:{element_id}'
-                    )
-                    self.canvas_items.append(outline)
-                    
-                    # Add element tag name for debugging
-                    tag_label = self.canvas.create_text(
-                        x + 3, y + 3,
-                        text=tag_name,
-                        font=("Arial", 8),
-                        fill=outline_color,
-                        anchor="nw"
-                    )
-                    self.canvas_items.append(tag_label)
-            except (ValueError, TypeError) as e:
-                logger.error(f"Error adding debug outline: {e}")
         
         # Render children
         if hasattr(layout_box, 'children') and layout_box.children:
@@ -2602,32 +2599,97 @@ class HTML5Renderer:
         except ValueError:
             return 0
 
-    def _render_text_content(self, layout_box):
+    def _calculate_dimension(self, value, container_dimension: int, element_type: str = None, dimension_type: str = 'width', layout_box=None) -> int:
         """
-        Render the text content of an element.
+        Calculate a dimension value with consistent fallback behavior.
         
         Args:
-            layout_box: The layout box of the element to render text for
+            value: The dimension value to calculate (can be int, float, str, or None)
+            container_dimension: The parent/container dimension to use for calculations
+            element_type: The type of element (e.g., 'block', 'inline', etc.)
+            dimension_type: The type of dimension being calculated ('width' or 'height')
+            layout_box: Optional layout box for additional metrics
+            
+        Returns:
+            int: The calculated dimension value
         """
         try:
-            # Get the element from the layout box
-            element = layout_box.element
-            if not element:
-                return
+            # Handle numeric values
+            if isinstance(value, (int, float)):
+                return int(value)
                 
-            # Get proper position from box metrics
-            x = layout_box.box_metrics.x
-            y = layout_box.box_metrics.y
+            # Handle string values
+            if isinstance(value, str):
+                # Handle 'auto'
+                if value == 'auto':
+                    if dimension_type == 'width':
+                        if element_type == 'block':
+                            # Block elements take full container width minus margins
+                            if layout_box:
+                                return container_dimension - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+                            return int(container_dimension * 0.95)  # 95% of container if no metrics
+                        else:
+                            # Inline elements use percentage of container
+                            return int(container_dimension * 0.8)  # 80% of container width
+                    else:  # height
+                        if layout_box and layout_box.children:
+                            # Calculate based on children
+                            total_height = 0
+                            for child in layout_box.children:
+                                if isinstance(child.box_metrics.margin_box_height, (int, float)):
+                                    total_height += child.box_metrics.margin_box_height
+                            if total_height > 0:
+                                return total_height
+                        # Default to aspect ratio based on width
+                        width = self._calculate_dimension(layout_box.box_metrics.content_width, container_dimension, element_type, 'width', layout_box) if layout_box else container_dimension
+                        return int(width * 0.6)  # Default aspect ratio
+                
+                # Handle percentage values
+                if value.endswith('%'):
+                    try:
+                        percentage = float(value[:-1]) / 100
+                        return int(container_dimension * percentage)
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Try converting numeric string
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    pass
             
-            # Add padding for better text positioning
-            x += layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
-            y += layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
+            # Fallback values
+            if dimension_type == 'width':
+                return int(container_dimension * 0.8)  # 80% of container
+            else:  # height
+                width = self._calculate_dimension(layout_box.box_metrics.content_width, container_dimension, element_type, 'width', layout_box) if layout_box else container_dimension
+                return int(width * 0.6)  # Default aspect ratio
                 
-            # Skip rendering text content for script and style tags
-            if hasattr(element, 'tag_name') and element.tag_name.lower() in ['script', 'style']:
+        except Exception as e:
+            logger.error(f"Error calculating {dimension_type}: {e}")
+            # Ultimate fallback
+            if dimension_type == 'width':
+                return int(container_dimension * 0.8)
+            return int(container_dimension * 0.5)
+
+    def _render_text_content(self, layout_box):
+        """
+        Render text content for a layout box.
+        
+        Args:
+            layout_box: The layout box containing text to render
+        """
+        try:
+            if not layout_box or not layout_box.element:
                 return
                 
-            # Get the text content
+            element = layout_box.element
+            
+            # Skip script and style tags
+            if hasattr(element, 'tag_name') and element.tag_name.lower() in ('script', 'style'):
+                return
+                
+            # Get text content
             text = None
             if hasattr(element, 'text_content'):
                 text = element.text_content
@@ -2636,38 +2698,44 @@ class HTML5Renderer:
             elif hasattr(element, 'text'):
                 text = element.text
                 
-            # If no direct text content, try to get text from child nodes
-            if not text or not text.strip():
+            if not text:
+                # Try to get text from child nodes
                 text = self._extract_text_content(element)
-            
+                
             if not text or not text.strip():
                 return
+                
+            # Get positioning from box metrics
+            x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
+            y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
             
-            # Use computed style for font settings if available
-            font_family = "Arial"
-            font_size = 12
+            # Get font settings from computed style
+            font_family = "Arial"  # Default font
+            font_size = 12  # Default size
             font_weight = "normal"
             font_style = "normal"
             
-            # Get font settings from computed style
             if hasattr(layout_box, 'computed_style'):
-                style = layout_box.computed_style
-                font_family = style.get('font-family', font_family)
+                font_family = layout_box.computed_style.get('font-family', font_family)
+                font_size_str = layout_box.computed_style.get('font-size', str(font_size))
+                font_weight = layout_box.computed_style.get('font-weight', font_weight)
+                font_style = layout_box.computed_style.get('font-style', font_style)
                 
-                # Get font size from style
-                font_size_str = style.get('font-size')
-                if font_size_str:
-                    try:
-                        # Extract numeric part of font size (e.g., "16px" -> 16)
-                        font_size = int(''.join(filter(str.isdigit, font_size_str))) or font_size
-                    except (ValueError, TypeError):
-                        pass  # Keep default if parsing fails
-                
-                font_weight = style.get('font-weight', font_weight)
-                font_style = style.get('font-style', font_style)
+                # Convert font size to integer
+                try:
+                    if isinstance(font_size_str, str):
+                        if font_size_str.endswith('px'):
+                            font_size = int(font_size_str[:-2])
+                        else:
+                            font_size = int(font_size_str)
+                    else:
+                        font_size = int(font_size_str)
+                except (ValueError, TypeError):
+                    font_size = 12  # Fallback to default size
             
-            # Font configuration with proper weight and style
+            # Create font configuration
             font_config = (font_family, font_size)
+            
             if font_weight == 'bold':
                 font_config = (font_family, font_size, 'bold')
             if font_style == 'italic':
@@ -2685,7 +2753,15 @@ class HTML5Renderer:
             tag_name = element.tag_name.lower() if hasattr(element, 'tag_name') else ''
             
             # Calculate available width for text wrapping
-            available_width = layout_box.box_metrics.content_width
+            element_type = 'block' if layout_box.display == 'block' else 'inline'
+            available_width = self._calculate_dimension(
+                layout_box.box_metrics.content_width,
+                self.viewport_width,
+                element_type,
+                'width',
+                layout_box
+            )
+            
             if available_width <= 0:
                 available_width = None  # Let text flow naturally if no width constraint
             
@@ -2807,7 +2883,7 @@ class HTML5Renderer:
         # Different dimensions based on input type
         if tag_name == 'input' and element_type in ['submit', 'button', 'reset']:
             # Buttons are typically shorter but taller
-            if width > 150:
+            if int(width) > 150:
                 width = 150
             height = max(height, 32)  # Ensure buttons have enough height
         elif tag_name == 'textarea':
@@ -3059,3 +3135,72 @@ class HTML5Renderer:
                 fill="#ff0000"
             )
             self.canvas_items.append(fallback_text)
+
+    def _layout_box(self, layout_box: LayoutBox, x: int, y: int, container_width: int) -> None:
+        """
+        Apply layout to a single box and its children.
+        
+        Args:
+            layout_box: Layout box to apply layout to
+            x: X position
+            y: Y position
+            container_width: Width of containing box
+        """
+        try:
+            # Set position
+            layout_box.box_metrics.x = x
+            layout_box.box_metrics.y = y
+            
+            # Calculate width
+            if isinstance(layout_box.box_metrics.content_width, str):
+                if layout_box.box_metrics.content_width == 'auto':
+                    # Default to fill container
+                    layout_box.box_metrics.content_width = container_width - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+                else:
+                    # Try to convert numeric string to int
+                    try:
+                        layout_box.box_metrics.content_width = int(layout_box.box_metrics.content_width)
+                    except ValueError:
+                        # If conversion fails, default to container width
+                        layout_box.box_metrics.content_width = container_width - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+            
+            # Update box dimensions
+            layout_box._update_box_dimensions()
+            
+            # Layout children
+            if layout_box.display == 'block':
+                self._layout_block_children(layout_box, container_width)
+            elif layout_box.display == 'inline':
+                self._layout_inline_children(layout_box, container_width)
+            else:
+                # Default to block layout
+                self._layout_block_children(layout_box, container_width)
+            
+            # Calculate height based on children
+            if isinstance(layout_box.box_metrics.content_height, str):
+                if layout_box.box_metrics.content_height == 'auto':
+                    height = 0
+                    for child in layout_box.children:
+                        child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height - layout_box.box_metrics.y
+                        height = max(height, child_bottom)
+                    layout_box.box_metrics.content_height = height
+                else:
+                    # Try to convert numeric string to int
+                    try:
+                        layout_box.box_metrics.content_height = int(layout_box.box_metrics.content_height)
+                    except ValueError:
+                        # If conversion fails, calculate based on children
+                        height = 0
+                        for child in layout_box.children:
+                            child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height - layout_box.box_metrics.y
+                            height = max(height, child_bottom)
+                        layout_box.box_metrics.content_height = height
+            
+            layout_box._update_box_dimensions()
+            
+        except Exception as e:
+            logger.error(f"Error during layout: {e}")
+            # Set safe default values
+            layout_box.box_metrics.content_width = container_width
+            layout_box.box_metrics.content_height = 0
+            layout_box._update_box_dimensions()

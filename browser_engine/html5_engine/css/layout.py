@@ -86,16 +86,28 @@ class BoxMetrics:
     @property
     def padding_box_width(self) -> int:
         """Get the width of the padding box."""
-        if self.width is None:
-            return 0
-        return self.width + self.padding_left + self.padding_right
+        width = self.width
+        if isinstance(width, str):
+            try:
+                width = int(width)
+            except (ValueError, TypeError):
+                width = 0
+        elif width is None:
+            width = 0
+        return width + self.padding_left + self.padding_right
     
     @property
     def padding_box_height(self) -> int:
         """Get the height of the padding box."""
-        if self.height is None:
-            return 0
-        return self.height + self.padding_top + self.padding_bottom
+        height = self.height
+        if isinstance(height, str):
+            try:
+                height = int(height)
+            except (ValueError, TypeError):
+                height = 0
+        elif height is None:
+            height = 0
+        return height + self.padding_top + self.padding_bottom
     
     @property
     def border_box_width(self) -> int:
@@ -116,6 +128,43 @@ class BoxMetrics:
     def margin_box_height(self) -> int:
         """Get the height of the margin box."""
         return self.border_box_height + self.margin_top + self.margin_bottom
+
+    def _update_box_dimensions(self) -> None:
+        """
+        Update box dimensions based on content dimensions.
+        
+        This method updates the box dimensions based on the content dimensions,
+        taking into account padding, border, and margin.
+        """
+        # Handle content width
+        if isinstance(self.content_width, (int, float)):
+            self.width = self.content_width
+        elif isinstance(self.content_width, str):
+            if self.content_width == 'auto':
+                # For auto width, we'll use a default percentage of parent width
+                # This will be adjusted by the layout engine based on the element type
+                self.width = 0  # Will be set by layout engine
+            else:
+                try:
+                    self.width = int(self.content_width)
+                except (ValueError, TypeError):
+                    # If conversion fails, use a default width
+                    self.width = 0  # Will be set by layout engine
+        
+        # Handle content height
+        if isinstance(self.content_height, (int, float)):
+            self.height = self.content_height
+        elif isinstance(self.content_height, str):
+            if self.content_height == 'auto':
+                # For auto height, we'll use a default based on content
+                # This will be adjusted by the layout engine based on content and children
+                self.height = 0  # Will be set by layout engine
+            else:
+                try:
+                    self.height = int(self.content_height)
+                except (ValueError, TypeError):
+                    # If conversion fails, use a default height
+                    self.height = 0  # Will be set by layout engine
 
 class LayoutBox:
     """
@@ -168,13 +217,23 @@ class LayoutBox:
         This method updates the box dimensions based on the content dimensions,
         taking into account padding, border, and margin.
         """
-        # If content width is a number, use it to calculate width
+        # If content width is a number or numeric string, use it to calculate width
         if isinstance(self.box_metrics.content_width, (int, float)):
             self.box_metrics.width = self.box_metrics.content_width
+        elif isinstance(self.box_metrics.content_width, str):
+            try:
+                self.box_metrics.width = int(self.box_metrics.content_width)
+            except (ValueError, TypeError):
+                self.box_metrics.width = 0
         
-        # If content height is a number, use it to calculate height
+        # If content height is a number or numeric string, use it to calculate height
         if isinstance(self.box_metrics.content_height, (int, float)):
             self.box_metrics.height = self.box_metrics.content_height
+        elif isinstance(self.box_metrics.content_height, str):
+            try:
+                self.box_metrics.height = int(self.box_metrics.content_height)
+            except (ValueError, TypeError):
+                self.box_metrics.height = 0
 
 class LayoutEngine:
     """
@@ -250,36 +309,73 @@ class LayoutEngine:
             y: Y position
             container_width: Width of containing box
         """
-        # Set position
-        layout_box.box_metrics.x = x
-        layout_box.box_metrics.y = y
-        
-        # Calculate width
-        if layout_box.box_metrics.content_width == 'auto':
-            # Default to fill container
-            layout_box.box_metrics.content_width = container_width - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
-        
-        # Update box dimensions
-        layout_box._update_box_dimensions()
-        
-        # Layout children
-        if layout_box.display == 'block':
-            self._layout_block_children(layout_box, container_width)
-        elif layout_box.display == 'inline':
-            self._layout_inline_children(layout_box, container_width)
-        else:
-            # Default to block layout
-            self._layout_block_children(layout_box, container_width)
-        
-        # Calculate height based on children
-        if layout_box.box_metrics.content_height == 'auto':
-            height = 0
-            for child in layout_box.children:
-                child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height - layout_box.box_metrics.y
-                height = max(height, child_bottom)
-            layout_box.box_metrics.content_height = height
-            layout_box._update_box_dimensions()
+        try:
+            # Set position
+            layout_box.box_metrics.x = x
+            layout_box.box_metrics.y = y
             
+            # Calculate width if it needs to be determined
+            if layout_box.box_metrics.width == 0:
+                if layout_box.display == DisplayType.BLOCK:
+                    # Block elements take up full container width minus margins
+                    layout_box.box_metrics.content_width = container_width - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+                else:
+                    # Inline elements use a percentage of container width
+                    layout_box.box_metrics.content_width = int(container_width * 0.8)  # 80% of container width
+            
+            # Update box dimensions
+            try:
+                layout_box._update_box_dimensions()
+            except Exception as e:
+                logger.error(f"Error updating box dimensions: {e}")
+            
+            # Layout children
+            try:
+                if layout_box.display == DisplayType.BLOCK:
+                    self._layout_block_children(layout_box, container_width)
+                elif layout_box.display == DisplayType.INLINE:
+                    self._layout_inline_children(layout_box, container_width)
+                else:
+                    # Default to block layout
+                    self._layout_block_children(layout_box, container_width)
+            except Exception as e:
+                logger.error(f"Error laying out children: {e}")
+            
+            # Calculate height if it needs to be determined
+            if layout_box.box_metrics.height == 0:
+                # First try to calculate height based on children
+                height = 0
+                for child in layout_box.children:
+                    try:
+                        # Ensure child metrics are numeric
+                        child_y = child.box_metrics.y if isinstance(child.box_metrics.y, (int, float)) else 0
+                        child_height = child.box_metrics.margin_box_height if isinstance(child.box_metrics.margin_box_height, (int, float)) else 0
+                        layout_y = layout_box.box_metrics.y if isinstance(layout_box.box_metrics.y, (int, float)) else 0
+                        
+                        child_bottom = child_y + child_height - layout_y
+                        height = max(height, child_bottom)
+                    except Exception as e:
+                        logger.error(f"Error calculating child height: {e}")
+                        continue
+                
+                # If no children or height is still 0, use a percentage of width
+                if height == 0:
+                    height = int(layout_box.box_metrics.content_width * 0.6)  # Default aspect ratio of 0.6
+                
+                layout_box.box_metrics.content_height = height
+                
+            try:
+                layout_box._update_box_dimensions()
+            except Exception as e:
+                logger.error(f"Error updating final box dimensions: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error during layout: {e}")
+            # Set safe default values
+            layout_box.box_metrics.content_width = int(container_width * 0.8)  # 80% of container width
+            layout_box.box_metrics.content_height = int(layout_box.box_metrics.content_width * 0.6)  # Default aspect ratio
+            layout_box._update_box_dimensions()
+
     def _layout_block_children(self, layout_box: LayoutBox, container_width: int) -> None:
         """
         Layout block children of a box.
@@ -291,9 +387,28 @@ class LayoutEngine:
         x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
         y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
         
-        available_width = layout_box.box_metrics.content_width
-        total_height = 0
+        # Calculate available width safely
+        try:
+            if isinstance(layout_box.box_metrics.content_width, (int, float)):
+                available_width = layout_box.box_metrics.content_width
+            elif isinstance(layout_box.box_metrics.content_width, str):
+                if layout_box.box_metrics.content_width == 'auto':
+                    # For auto width, use container width minus padding and borders
+                    available_width = container_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right - layout_box.box_metrics.border_left_width - layout_box.box_metrics.border_right_width
+                else:
+                    try:
+                        available_width = int(layout_box.box_metrics.content_width)
+                    except (ValueError, TypeError):
+                        # If conversion fails, use container width as fallback
+                        available_width = container_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right
+            else:
+                # Default to container width if content_width is None or invalid
+                available_width = container_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right
+        except Exception as e:
+            logger.error(f"Error calculating available width: {e}")
+            available_width = container_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right
         
+        total_height = 0
         prev_element_tag = None
         
         for child in layout_box.children:
@@ -1391,8 +1506,9 @@ class GridLayoutEngine:
         elif gap_str.endswith('%'):
             try:
                 percentage = float(gap_str[:-1]) / 100
-                # Use parent width for column gap percentage calculations
-                return int(self.parent_width * percentage)
+                # Use container's main axis for percentage calculations
+                container_size = self.parent_width if self.direction in ['row', 'row-reverse'] else self.parent_height
+                return container_size * percentage
             except ValueError:
                 return 0
         else:
