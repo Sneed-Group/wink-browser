@@ -31,6 +31,9 @@ class TkRenderer:
         # Zoom level (1.0 = 100%)
         self.zoom_level = 1.0
         
+        # Track processed text nodes to prevent duplicates
+        self.processed_text_nodes = set()
+        
         # Create the main content view
         self._create_content_view()
         
@@ -260,6 +263,13 @@ class TkRenderer:
                 # Get the text with whitespace trimmed
                 text = element.string.strip()
                 
+                # Create a unique identifier for this text node
+                text_id = f"{id(element)}_{text}"
+                
+                # Skip if this text was already processed
+                if text_id in self.processed_text_nodes:
+                    return
+                
                 # Get a unique tag identifier for this text
                 self.tag_counter += 1
                 tag_name = f"normal_{self.tag_counter}"
@@ -282,6 +292,9 @@ class TkRenderer:
                 
                 # Track this tag
                 self.applied_tags[start_index] = tag_name
+                
+                # Mark this text node as processed
+                self.processed_text_nodes.add(text_id)
             return
         
         # Handle different HTML elements

@@ -269,6 +269,9 @@ class HTML5Renderer:
         logger.debug("HTML5 Renderer initialized")
         
         # No longer drawing a debug rectangle to avoid rendering issues
+        
+        # Track processed nodes to prevent duplicates
+        self.processed_nodes = set()
     
     def _init_fonts(self) -> None:
         """
@@ -1059,6 +1062,16 @@ class HTML5Renderer:
         if not node:
             return ""
             
+        # Create a unique identifier for this node
+        node_id = f"{id(node)}"
+        
+        # Skip if this node was already processed
+        if node_id in self.processed_nodes:
+            return ""
+        
+        # Mark node as processed
+        self.processed_nodes.add(node_id)
+        
         # Get direct text content
         text = ""
         
@@ -2689,6 +2702,16 @@ class HTML5Renderer:
             if hasattr(element, 'tag_name') and element.tag_name.lower() in ('script', 'style'):
                 return
                 
+            # Create a unique identifier for this element
+            element_id = f"{id(element)}"
+            
+            # Skip if this element was already rendered
+            if element_id in self.processed_nodes:
+                return
+            
+            # Mark element as processed
+            self.processed_nodes.add(element_id)
+            
             # Get text content
             text = None
             if hasattr(element, 'text_content'):
