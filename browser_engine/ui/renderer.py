@@ -204,6 +204,11 @@ class TkRenderer:
         # Reset all tags and styling
         self._configure_text_tags()
         
+        # Clear processed nodes tracking
+        self.processed_text_nodes.clear()
+        self.applied_tags.clear()
+        self.tag_counter = 0
+        
         # Get the DOM from the engine
         dom = self.engine.dom
         if not dom:

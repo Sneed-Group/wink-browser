@@ -406,6 +406,11 @@ class HTML5Renderer:
             document: The DOM document to render
             layout: Optional pre-computed layout box
         """
+        # Clear any existing content and state
+        self._clear_canvas()
+        self.processed_nodes.clear()
+        self.canvas_items.clear()
+        
         # Enhanced debug logging for document state
         logger.debug(f"RENDER DEBUG: document is: {document}")
         logger.debug(f"RENDER DEBUG: document type is: {type(document)}")
@@ -464,9 +469,6 @@ class HTML5Renderer:
             # Continue with rendering
         
         logger.info(f"Document has {element_count} elements")
-        
-        # Clear any previous content
-        self.clear()
         
         # More detailed logging for debugging element detection
         logger.debug(f"RENDER DEBUG: document_element exists: {hasattr(document, 'document_element') and document.document_element is not None}")

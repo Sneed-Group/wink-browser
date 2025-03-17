@@ -410,37 +410,8 @@ class BrowserEngine:
     def _process_stylesheets_thread(self) -> None:
         """Background thread for processing stylesheets."""
         try:
-            # Process CSS for each stylesheet
+            # Reset stylesheets list
             self.stylesheets = []
-            
-            # If in text-only mode, remove style and link[rel=stylesheet] tags from the DOM
-            # to prevent their content from appearing in the plain text output
-            if self.text_only_mode and self.dom:
-                try:
-                    # Remove style tags safely
-                    try:
-                        for style_tag in self.dom.find_all('style'):
-                            try:
-                                style_tag.decompose()
-                            except Exception as tag_error:
-                                logger.warning(f"Error removing style tag: {tag_error}")
-                    except Exception as find_error:
-                        logger.warning(f"Error finding style tags: {find_error}")
-                    
-                    # Remove link tags for stylesheets safely
-                    try:
-                        for link_tag in self.dom.find_all('link', rel='stylesheet'):
-                            try:
-                                link_tag.decompose()
-                            except Exception as tag_error:
-                                logger.warning(f"Error removing stylesheet link tag: {tag_error}")
-                    except Exception as find_error:
-                        logger.warning(f"Error finding stylesheet link tags: {find_error}")
-                    
-                    logger.debug("Removed style and stylesheet link tags in text-only mode")
-                except Exception as e:
-                    logger.error(f"Error processing DOM in text-only mode: {e}")
-                return
             
             # Extract stylesheets from the DOM
             try:
@@ -577,6 +548,18 @@ class BrowserEngine:
                     self.stylesheets.extend(imported_stylesheets)
             except Exception as e:
                 logger.error(f"Error processing @import rules: {e}")
+            
+            # Update the CSS parser's stylesheets
+            self.css_parser.stylesheets = self.stylesheets
+            
+            # Update the combined style rules
+            self.css_parser.style_rules = {}
+            for stylesheet in self.stylesheets:
+                for selector, props in stylesheet.items():
+                    if selector in self.css_parser.style_rules:
+                        self.css_parser.style_rules[selector].update(props)
+                    else:
+                        self.css_parser.style_rules[selector] = props.copy()
             
             logger.debug(f"Processed {len(self.stylesheets)} total stylesheets")
         except Exception as e:
@@ -1392,6 +1375,13 @@ class BrowserEngine:
             url: Base URL for resolving relative URLs
         """
         try:
+            # Clear previous state
+            self.dom = None
+            self.page_title = None
+            self.load_progress = 0
+            self.is_loading = True
+            self._notify_loading_state()
+            
             # Parse HTML
             self.load_progress = 60
             self._notify_loading_state()
@@ -1403,18 +1393,18 @@ class BrowserEngine:
             title_tag = self.dom.find('title')
             self.page_title = title_tag.text if title_tag else url
             
-            # Process stylesheets
-            self.load_progress = 70
-            self._notify_loading_state()
-            self._process_stylesheets()
-            
             # Download resources (images, etc.) unless in text-only mode
             text_only_mode = getattr(self, 'text_only_mode', False)
             if not text_only_mode:
-                self.load_progress = 80
+                self.load_progress = 70
                 self._notify_loading_state()
                 self._load_resources(url)
-                
+            
+            # Process stylesheets after resources are loaded
+            self.load_progress = 80
+            self._notify_loading_state()
+            self._process_stylesheets()
+            
             # Execute JavaScript unless in text-only mode or JavaScript is disabled
             js_disabled = getattr(self, 'js_disabled', False)
             if not text_only_mode and not js_disabled:
