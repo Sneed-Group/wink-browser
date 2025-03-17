@@ -537,4 +537,151 @@ class Element(Node):
                 escaped_value = value.replace('"', '&quot;')
                 result.append(f' {name}="{escaped_value}"')
         
-        return "".join(result) 
+        return "".join(result)
+
+    def _parse_inline_styles(self) -> None:
+        """
+        Parse inline style attribute to CSS properties.
+        """
+        style_attr = self.get_attribute('style')
+        if not style_attr:
+            return
+        
+        # Get CSS parser
+        from ..css.parser import CSSParser
+        css_parser = CSSParser()
+        
+        # Parse declarations
+        style_dict = css_parser.parse_inline_styles(style_attr)
+        
+        # Add to element's style dictionary
+        self._style.update(style_dict)
+    
+    def get_computed_style(self, inherit_from_parent: bool = True) -> Dict[str, str]:
+        """
+        Get computed style for this element.
+        
+        Args:
+            inherit_from_parent: Whether to inherit styles from parent
+            
+        Returns:
+            Dictionary of computed styles
+        """
+        # Start with default styles for the tag
+        computed_styles = self._get_default_styles()
+        
+        # Inherit from parent if applicable
+        if inherit_from_parent and self.parent_node and hasattr(self.parent_node, 'get_computed_style'):
+            parent_styles = self.parent_node.get_computed_style()
+            
+            # Only inherit applicable properties
+            inheritable_properties = [
+                'color', 'font-family', 'font-size', 'font-weight', 'font-style',
+                'line-height', 'letter-spacing', 'text-align', 'text-indent',
+                'word-spacing', 'white-space', 'direction', 'visibility'
+            ]
+            
+            for prop in inheritable_properties:
+                if prop in parent_styles and prop not in self._style:
+                    computed_styles[prop] = parent_styles[prop]
+        
+        # Apply CSS from style sheets (would be done by a proper CSS engine)
+        # ...
+        
+        # Apply element's own styles (highest precedence)
+        computed_styles.update(self._style)
+        
+        return computed_styles
+    
+    def _get_default_styles(self) -> Dict[str, str]:
+        """
+        Get default styles for this element.
+        
+        Returns:
+            Dictionary of default styles based on element type
+        """
+        default_styles = {
+            'color': '#000000',
+            'font-family': 'Arial, sans-serif',
+            'font-size': '16px',
+            'font-weight': 'normal',
+            'font-style': 'normal',
+            'text-decoration': 'none',
+            'text-align': 'left',
+            'line-height': '1.2',
+            'display': 'inline',  # Default for most elements
+            'margin-top': '0px',
+            'margin-right': '0px',
+            'margin-bottom': '0px',
+            'margin-left': '0px',
+            'padding-top': '0px',
+            'padding-right': '0px',
+            'padding-bottom': '0px',
+            'padding-left': '0px',
+            'border-width': '0px',
+            'background-color': 'transparent'
+        }
+        
+        # Adjust based on tag name
+        tag = self.tag_name.lower()
+        
+        # Block elements
+        if tag in ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'form', 'article', 'section']:
+            default_styles['display'] = 'block'
+            
+            # Different margins for different block elements
+            if tag == 'div':
+                # Divs have minimal default styling
+                pass
+            elif tag == 'p':
+                default_styles['margin-top'] = '1em'
+                default_styles['margin-bottom'] = '1em'
+            
+            # Headings
+            elif tag.startswith('h') and len(tag) == 2 and tag[1].isdigit():
+                heading_level = int(tag[1])
+                if 1 <= heading_level <= 6:
+                    # Font size by heading level (h1 largest, h6 smallest)
+                    sizes = ['2em', '1.5em', '1.17em', '1em', '0.83em', '0.67em']
+                    default_styles['font-size'] = sizes[heading_level - 1]
+                    default_styles['font-weight'] = 'bold'
+                    default_styles['margin-top'] = '0.67em'
+                    default_styles['margin-bottom'] = '0.67em'
+        
+        # List elements
+        if tag == 'li':
+            default_styles['margin-left'] = '40px'
+        
+        # Tables
+        if tag == 'table':
+            default_styles['border-collapse'] = 'separate'
+            default_styles['border-spacing'] = '2px'
+        
+        if tag in ['th', 'td']:
+            default_styles['padding'] = '1px'
+        
+        # Links
+        if tag == 'a':
+            default_styles['color'] = '#0000EE'
+            default_styles['text-decoration'] = 'underline'
+        
+        # Text formatting elements
+        if tag in ['strong', 'b']:
+            default_styles['font-weight'] = 'bold'
+        
+        if tag in ['em', 'i']:
+            default_styles['font-style'] = 'italic'
+        
+        if tag == 'u':
+            default_styles['text-decoration'] = 'underline'
+        
+        if tag in ['s', 'strike', 'del']:
+            default_styles['text-decoration'] = 'line-through'
+        
+        # Code, pre, and other monospace elements
+        if tag in ['code', 'pre', 'kbd', 'samp']:
+            default_styles['font-family'] = 'monospace'
+            if tag == 'pre':
+                default_styles['white-space'] = 'pre'
+        
+        return default_styles 

@@ -15,6 +15,7 @@ from tkinter import ttk
 from ..dom import Document, SelectorEngine
 from ..css import CSSParser, LayoutEngine
 from ..rendering import HTML5Renderer
+from ..js import JSEngine
 
 class HTML5Engine:
     """
@@ -48,6 +49,7 @@ class HTML5Engine:
         self.css_parser = CSSParser()
         self.selector_engine = SelectorEngine()
         self.layout_engine = LayoutEngine()
+        self.js_engine = JSEngine()
         
         # The renderer will be initialized later when a parent frame is available
         self.renderer = None
@@ -96,8 +98,14 @@ class HTML5Engine:
         # Calculate layout
         self._calculate_layout()
         
+        # Set up JavaScript environment
+        self.js_engine.setup_document(self.document)
+        
         # Render the document
         self._render()
+        
+        # Execute scripts
+        self.js_engine.execute_scripts(self.document)
         
         # Trigger load event
         self._trigger_load()
@@ -406,6 +414,13 @@ class HTML5Engine:
     
     def _trigger_load(self) -> None:
         """Trigger load event handlers."""
+        # Trigger JS load event
+        try:
+            self.js_engine.handle_event('load')
+        except Exception as e:
+            self.logger.error(f"Error triggering JS load event: {e}")
+        
+        # Trigger internal load handlers
         for handler in self.on_load_handlers:
             try:
                 handler()
