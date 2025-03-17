@@ -424,7 +424,18 @@ class LayoutBox:
                         self.box_metrics.content_height = line_height
                 else:
                     # Empty element with no explicit height
-                    self.box_metrics.content_height = 0
+                    # Ensure a minimum height based on tag type
+                    tag_name = self.element.tag_name.lower() if hasattr(self.element, 'tag_name') else ''
+                    
+                    # Form elements should have a minimum height even if empty
+                    if tag_name in ['input', 'button', 'select', 'textarea']:
+                        self.box_metrics.content_height = 24  # Minimum height for form elements
+                    elif tag_name in ['div', 'span', 'p', 'a']:
+                        # Ensure non-zero height for container elements
+                        self.box_metrics.content_height = 16  # Minimum height for containers
+                    else:
+                        # Default minimum height for any element
+                        self.box_metrics.content_height = 8
         
         # Update box dimensions after calculating content height
         self._update_box_dimensions()

@@ -301,40 +301,32 @@ class LayoutEngine:
             
             # Add additional spacing between elements
             # Default spacing for all elements
-            extra_spacing = 15  # Increased base spacing for all elements (was 10)
+            extra_spacing = 25  # Increased from 15 to 25
             
-            if child.element and hasattr(child.element, 'tag_name'):
+            # Get current element tag
+            current_tag = None
+            if hasattr(child.element, 'tag_name'):
                 current_tag = child.element.tag_name.lower()
                 
-                # Determine if we need extra spacing based on element types
-                if prev_element_tag and current_tag:
-                    # Increased spacing for better readability
-                    if prev_element_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                        extra_spacing = 30  # Increased from 20
-                    elif prev_element_tag == 'p' and current_tag == 'p':
-                        extra_spacing = 25   # Increased from 16
-                    elif prev_element_tag in ['div', 'section', 'article']:
-                        extra_spacing = 24  # Increased from 18
-                    elif prev_element_tag in ['ul', 'ol']:
-                        extra_spacing = 28  # Increased from 18
-                    elif prev_element_tag == 'li':
-                        extra_spacing = 12   # Increased from 8
-                    elif prev_element_tag in ['table', 'form']:
-                        extra_spacing = 30  # Increased from 20
-                    elif prev_element_tag == 'img':
-                        extra_spacing = 25  # Increased from 18
-                
-                # Add more spacing before headings
-                if current_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and prev_element_tag:
-                    extra_spacing = max(extra_spacing, 35)  # Increased from 25
-                
-                # Add more spacing before and after horizontal rules
-                if current_tag == 'hr' or prev_element_tag == 'hr':
-                    extra_spacing = max(extra_spacing, 32)  # Increased from 22
+            # Add extra spacing for certain elements
+            if current_tag:
+                # Form elements need more space
+                if current_tag in ['input', 'button', 'textarea', 'select']:
+                    extra_spacing = 35  # More space for form elements
+                # Add extra space after paragraphs, headings, and divs
+                elif current_tag in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div']:
+                    extra_spacing = 30
+                # Links and spans often need less space
+                elif current_tag in ['a', 'span']:
+                    extra_spacing = 20
                     
-                # Add more spacing around form elements
-                if current_tag in ['input', 'select', 'textarea', 'button'] or prev_element_tag in ['input', 'select', 'textarea', 'button']:
-                    extra_spacing = max(extra_spacing, 25)  # Increased from 15
+                # Ensure extra spacing if previous element was a form element
+                if prev_element_tag in ['input', 'button', 'textarea', 'select']:
+                    extra_spacing = max(extra_spacing, 35)  # Always ensure good spacing after form elements
+                    
+                # Ensure more spacing between two consecutive form elements
+                if current_tag in ['input', 'button', 'textarea', 'select'] and prev_element_tag in ['input', 'button', 'textarea', 'select']:
+                    extra_spacing = 40  # Even more space between consecutive form elements
                 
                 # Save current element tag for next iteration
                 prev_element_tag = current_tag

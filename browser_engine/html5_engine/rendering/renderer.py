@@ -2615,18 +2615,21 @@ class HTML5Renderer:
             if not element or not hasattr(element, 'tag_name'):
                 return
                 
-            # Use the position directly from the layout box
-            # These should be set when the layout is calculated
-            x = getattr(layout_box, 'x', 0)
-            y = getattr(layout_box, 'y', 0)
+            # Get proper position from box metrics
+            x = layout_box.box_metrics.x
+            y = layout_box.box_metrics.y
+            
+            # Add padding for better text positioning
+            x += layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
+            y += layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
                 
             # Skip rendering text content for script and style tags
-            if element.tag_name in ['script', 'style']:
+            if element.tag_name.lower() in ['script', 'style']:
                 logging.debug(f"Skipping text rendering for {element.tag_name}")
                 return
                 
             # Skip rendering text content for heading elements (h1-h6) as they have their own rendering method
-            if element.tag_name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+            if element.tag_name.lower() in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
                 logging.debug(f"Skipping text rendering for heading {element.tag_name}")
                 return
                 
@@ -2636,25 +2639,72 @@ class HTML5Renderer:
                 logging.debug(f"No text content to render for {element.tag_name}")
                 return
             
-            # Use default font settings
+            # Use computed style for font settings if available
             font_family = "Arial"
             font_size = 12
             font_weight = "normal"
             font_style = "normal"
             
-            # Create font configuration
+            # Get font settings from computed style
+            if hasattr(layout_box, 'computed_style'):
+                style = layout_box.computed_style
+                font_family = style.get('font-family', font_family)
+                
+                # Get font size from style
+                font_size_str = style.get('font-size')
+                if font_size_str:
+                    try:
+                        # Extract numeric part of font size (e.g., "16px" -> 16)
+                        font_size = int(''.join(filter(str.isdigit, font_size_str))) or font_size
+                    except (ValueError, TypeError):
+                        pass  # Keep default if parsing fails
+                
+                font_weight = style.get('font-weight', font_weight)
+                font_style = style.get('font-style', font_style)
+            
+            # Font configuration with proper weight and style
             font_config = (font_family, font_size)
+            if font_weight == 'bold':
+                font_config = (font_family, font_size, 'bold')
+            if font_style == 'italic':
+                if len(font_config) == 2:
+                    font_config = (font_family, font_size, 'italic')
+                else:
+                    font_config = (font_family, font_size, 'bold italic')
             
-            # Use default text color
-            color = "#000000"  # Black
+            # Text color from computed style
+            color = "#000000"
+            if hasattr(layout_box, 'computed_style'):
+                color = layout_box.computed_style.get('color', color)
             
-            # Create text item on canvas
+            # Get element tag for specific adjustments
+            tag_name = element.tag_name.lower()
+            
+            # Add extra vertical spacing for certain elements
+            if tag_name in ['p', 'div']:
+                y += 2  # Small extra spacing for paragraphs and divs
+            elif tag_name in ['a', 'span']:
+                y += 1  # Minimal spacing for inline elements
+            
+            # Limit text length to prevent performance issues with very long text
+            max_text_length = 5000
+            if len(text) > max_text_length:
+                text = text[:max_text_length] + "..."
+            
+            # Create text item on canvas with proper width for wrapping
+            width = layout_box.box_metrics.content_width
+            if width == 'auto' or not isinstance(width, (int, float)) or width <= 0:
+                width = self.viewport_width - 40  # Default width for wrapping
+            else:
+                width = min(width, self.viewport_width - 40)  # Ensure not too wide
+            
             text_item = self.canvas.create_text(
                 x, y,
                 text=text,
                 font=font_config,
                 fill=color,
-                anchor='nw'  # North-west anchor (top-left)
+                anchor='nw',  # North-west anchor (top-left)
+                width=width   # Allow wrapping
             )
             self.canvas_items.append(text_item)
             
@@ -2725,16 +2775,21 @@ class HTML5Renderer:
             return
             
         # Get positioning information from layout box
-        x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left
-        y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top
-        width = layout_box.box_metrics.width if hasattr(layout_box.box_metrics, 'width') and layout_box.box_metrics.width is not None else 100
-        height = layout_box.box_metrics.height if hasattr(layout_box.box_metrics, 'height') and layout_box.box_metrics.height is not None else 24
+        x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
+        y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
         
-        # Default height and width if not specified
-        if not isinstance(width, (int, float)) or width <= 0:
-            width = 100
-        if not isinstance(height, (int, float)) or height <= 0:
-            height = 24
+        # Get width and height from box metrics, with fallbacks
+        width = layout_box.box_metrics.content_width
+        height = layout_box.box_metrics.content_height
+        
+        # Ensure width and height are numeric and positive
+        if width == 'auto' or not isinstance(width, (int, float)) or width <= 0:
+            width = 200  # Default width for form elements
+        if height == 'auto' or not isinstance(height, (int, float)) or height <= 0:
+            height = 30  # Default height for form elements
+            
+        # Limit width to viewport
+        width = min(width, self.viewport_width - 40)
             
         tag_name = element.tag_name.lower()
         
@@ -2749,6 +2804,30 @@ class HTML5Renderer:
             element_type = 'text'  # Default input type is text
         if not element_value:
             element_value = ''
+            
+        # Different dimensions based on input type
+        if tag_name == 'input' and element_type in ['submit', 'button', 'reset']:
+            # Buttons are typically shorter but taller
+            if width > 150:
+                width = 150
+            height = max(height, 32)  # Ensure buttons have enough height
+        elif tag_name == 'textarea':
+            # Textareas are typically larger
+            height = max(height, 100)
+            width = max(width, 250)
+        elif tag_name == 'select':
+            # Select dropdown needs enough height for the arrow
+            height = max(height, 32)
+        
+        # Ensure minimum height for all form elements
+        height = max(height, 24)
+        
+        # Set the height back to the layout box to ensure proper layout
+        layout_box.box_metrics.content_height = height
+        layout_box._update_box_dimensions()
+        
+        # Log the form element rendering
+        logger.debug(f"Rendered form element {tag_name} at ({x}, {y}) with dimensions {width}x{height}")
         
         # Render different form elements
         try:
@@ -2764,33 +2843,41 @@ class HTML5Renderer:
                     self.canvas_items.append(input_rect)
                     
                     # Add text content (value or placeholder)
-                    display_text = element_value if element_value else (element_placeholder if element_placeholder else '')
-                    if element_type == 'password' and display_text:
-                        # Show asterisks for password fields
-                        display_text = '*' * len(display_text)
-                        
+                    text_content = element_value if element_value else element_placeholder if element_placeholder else ''
+                    text_color = "#333333" if element_value else "#999999"  # Gray for placeholder
+                    
                     text_item = self.canvas.create_text(
-                        x + 5, y + height // 2,
-                        text=display_text,
-                        font=("Arial", 10),
-                        fill="#333333" if element_value else "#999999",  # Gray for placeholder
-                        anchor="w"
+                        x + 5, y + (height // 2),
+                        text=text_content,
+                        font=("Arial", 12),
+                        fill=text_color,
+                        anchor="w"  # West anchor (left-middle)
                     )
                     self.canvas_items.append(text_item)
+                    
+                elif element_type in ['submit', 'button', 'reset']:
+                    # Create a button
+                    button_text = element_value if element_value else element_type.capitalize()
+                    
+                    button = self._render_button_element(
+                        x, y, width, height, 
+                        button_text, 
+                        element
+                    )
                     
                 elif element_type == 'checkbox':
                     # Create a checkbox
                     checkbox_size = min(16, height)
-                    checkbox_rect = self.canvas.create_rectangle(
-                        x, y + (height - checkbox_size) // 2,
+                    checkbox = self.canvas.create_rectangle(
+                        x, y + (height - checkbox_size) // 2, 
                         x + checkbox_size, y + (height + checkbox_size) // 2,
                         outline="#333333",
                         fill="#ffffff"
                     )
-                    self.canvas_items.append(checkbox_rect)
+                    self.canvas_items.append(checkbox)
                     
-                    # If checked, add a checkmark
-                    is_checked = element.get_attribute('checked') is not None if hasattr(element, 'get_attribute') else False
+                    # Add a check mark if checked
+                    is_checked = element.get_attribute('checked') if hasattr(element, 'get_attribute') else False
                     if is_checked:
                         checkmark = self.canvas.create_line(
                             x + 3, y + (height) // 2,
@@ -2801,79 +2888,131 @@ class HTML5Renderer:
                         )
                         self.canvas_items.append(checkmark)
                     
+                    # Add label if there's text
+                    if element_value:
+                        label = self.canvas.create_text(
+                            x + checkbox_size + 5, y + height // 2,
+                            text=element_value,
+                            font=("Arial", 12),
+                            fill="#333333",
+                            anchor="w"
+                        )
+                        self.canvas_items.append(label)
+                        
                 elif element_type == 'radio':
                     # Create a radio button
                     radio_size = min(16, height)
-                    radio_oval = self.canvas.create_oval(
-                        x, y + (height - radio_size) // 2,
+                    radio = self.canvas.create_oval(
+                        x, y + (height - radio_size) // 2, 
                         x + radio_size, y + (height + radio_size) // 2,
                         outline="#333333",
                         fill="#ffffff"
                     )
-                    self.canvas_items.append(radio_oval)
+                    self.canvas_items.append(radio)
                     
-                    # If checked, add a dot
-                    is_checked = element.get_attribute('checked') is not None if hasattr(element, 'get_attribute') else False
+                    # Add a dot if checked
+                    is_checked = element.get_attribute('checked') if hasattr(element, 'get_attribute') else False
                     if is_checked:
-                        dot_size = radio_size // 2
+                        dot_size = radio_size - 6
                         dot = self.canvas.create_oval(
-                            x + (radio_size - dot_size) // 2,
-                            y + (height - dot_size) // 2,
-                            x + (radio_size + dot_size) // 2,
-                            y + (height + dot_size) // 2,
-                            outline="#333333",
+                            x + 3, y + (height - dot_size) // 2, 
+                            x + 3 + dot_size, y + (height + dot_size) // 2,
+                            outline="",
                             fill="#333333"
                         )
                         self.canvas_items.append(dot)
-                
-                elif element_type == 'submit' or element_type == 'button':
-                    # Create a button
-                    button_rect = self.canvas.create_rectangle(
+                    
+                    # Add label if there's text
+                    if element_value:
+                        label = self.canvas.create_text(
+                            x + radio_size + 5, y + height // 2,
+                            text=element_value,
+                            font=("Arial", 12),
+                            fill="#333333",
+                            anchor="w"
+                        )
+                        self.canvas_items.append(label)
+                        
+                else:
+                    # Default input rendering
+                    input_rect = self.canvas.create_rectangle(
                         x, y, x + width, y + height,
-                        outline="#999999",
-                        fill="#e0e0e0",
-                        width=1
+                        outline="#cccccc",
+                        fill="#ffffff"
                     )
-                    self.canvas_items.append(button_rect)
-                    
-                    # Add button text
-                    button_text = element_value if element_value else ('Submit' if element_type == 'submit' else 'Button')
-                    text_item = self.canvas.create_text(
-                        x + width // 2, y + height // 2,
-                        text=button_text,
-                        font=("Arial", 10),
-                        fill="#333333"
-                    )
-                    self.canvas_items.append(text_item)
-                    
-            elif tag_name == 'button':
-                # Create a button
-                button_rect = self.canvas.create_rectangle(
-                    x, y, x + width, y + height,
-                    outline="#999999",
-                    fill="#e0e0e0",
-                    width=1
-                )
-                self.canvas_items.append(button_rect)
+                    self.canvas_items.append(input_rect)
                 
-                # Add button text
+            elif tag_name == 'button':
+                # Render button
                 button_text = ''
                 if hasattr(element, 'text_content') and element.text_content:
                     button_text = element.text_content
-                elif hasattr(element, 'innerText') and element.innerText:
-                    button_text = element.innerText
                 elif element_value:
                     button_text = element_value
                 else:
-                    button_text = 'Button'
+                    button_text = "Button"
                     
-                text_item = self.canvas.create_text(
-                    x + width // 2, y + height // 2,
-                    text=button_text,
-                    font=("Arial", 10),
+                self._render_button_element(
+                    x, y, width, height, 
+                    button_text, 
+                    element
+                )
+                
+            elif tag_name == 'select':
+                # Create a select dropdown
+                select_rect = self.canvas.create_rectangle(
+                    x, y, x + width, y + height,
+                    outline="#cccccc",
+                    fill="#ffffff"
+                )
+                self.canvas_items.append(select_rect)
+                
+                # Add dropdown arrow
+                arrow_x = x + width - 20
+                arrow_y = y + height // 2
+                arrow = self.canvas.create_polygon(
+                    arrow_x, arrow_y - 5,
+                    arrow_x + 10, arrow_y - 5,
+                    arrow_x + 5, arrow_y + 5,
                     fill="#333333"
                 )
-                self.canvas_items.append(text_item)
+                self.canvas_items.append(arrow)
+                
+                # Add selected option text if available
+                selected_text = ''
+                if hasattr(element, 'value') and element.value:
+                    selected_text = element.value
+                elif element_value:
+                    selected_text = element_value
+                elif hasattr(element, 'child_nodes'):
+                    # Try to find selected option
+                    for child in element.child_nodes:
+                        if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
+                            # Check if this option is selected
+                            is_selected = child.get_attribute('selected') if hasattr(child, 'get_attribute') else False
+                            if is_selected:
+                                if hasattr(child, 'text_content'):
+                                    selected_text = child.text_content
+                                break
+                    
+                    # If no selected option found, use first option
+                    if not selected_text:
+                        for child in element.child_nodes:
+                            if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
+                                if hasattr(child, 'text_content'):
+                                    selected_text = child.text_content
+                                break
+                
+                # Render selected text
+                if selected_text:
+                    text_item = self.canvas.create_text(
+                        x + 5, y + height // 2,
+                        text=selected_text,
+                        font=("Arial", 12),
+                        fill="#333333",
+                        anchor="w"
+                    )
+                    self.canvas_items.append(text_item)
                 
             elif tag_name == 'textarea':
                 # Create a textarea
@@ -2898,64 +3037,12 @@ class HTML5Renderer:
                 text_item = self.canvas.create_text(
                     x + 5, y + 5,
                     text=text_content,
-                    font=("Arial", 10),
+                    font=("Arial", 12),
                     fill="#333333" if text_content != element_placeholder else "#999999",
                     anchor="nw",
                     width=width - 10  # Allow text wrapping
                 )
                 self.canvas_items.append(text_item)
-                
-            elif tag_name == 'select':
-                # Create a select dropdown
-                select_rect = self.canvas.create_rectangle(
-                    x, y, x + width, y + height,
-                    outline="#cccccc",
-                    fill="#ffffff"
-                )
-                self.canvas_items.append(select_rect)
-                
-                # Add dropdown arrow
-                arrow_size = min(8, height // 2)
-                arrow = self.canvas.create_polygon(
-                    x + width - 15, y + (height - arrow_size) // 2,
-                    x + width - 15 + arrow_size, y + (height - arrow_size) // 2,
-                    x + width - 15 + arrow_size // 2, y + (height + arrow_size) // 2,
-                    fill="#666666"
-                )
-                self.canvas_items.append(arrow)
-                
-                # Find selected option or first option
-                selected_text = "Select..."
-                
-                # Check if there are option elements
-                if hasattr(element, 'child_nodes'):
-                    for child in element.child_nodes:
-                        if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
-                            # Check if this option is selected
-                            is_selected = child.get_attribute('selected') is not None if hasattr(child, 'get_attribute') else False
-                            
-                            if is_selected or selected_text == "Select...":
-                                if hasattr(child, 'text_content') and child.text_content:
-                                    selected_text = child.text_content
-                                elif hasattr(child, 'innerText') and child.innerText:
-                                    selected_text = child.innerText
-                                elif child.get_attribute('value') if hasattr(child, 'get_attribute') else None:
-                                    selected_text = child.get_attribute('value')
-                                    
-                                if is_selected:  # If found a selected option, break
-                                    break
-                
-                # Add selected text
-                text_item = self.canvas.create_text(
-                    x + 5, y + height // 2,
-                    text=selected_text,
-                    font=("Arial", 10),
-                    fill="#333333",
-                    anchor="w"
-                )
-                self.canvas_items.append(text_item)
-                
-            logger.debug(f"Rendered form element {tag_name} at ({x}, {y}) with dimensions {width}x{height}")
         except Exception as e:
             logger.error(f"Error rendering form element: {e}")
             # Render a basic fallback to at least show something
