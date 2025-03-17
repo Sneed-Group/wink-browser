@@ -8,7 +8,7 @@ import logging
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import certifi
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,16 @@ class NetworkManager:
         
         # Set user agent
         session.headers.update({
-            "User-Agent": "WinkBrowser/1.0 (Python)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1"
         })
         
         # Set cookies
@@ -137,25 +146,77 @@ class NetworkManager:
         # Create new headers dict or use empty dict if None
         request_headers = headers.copy() if headers else {}
         
-        # If private mode, don't send cookies
-        if self.config_manager.private_mode:
+        # Add key Cloudflare headers
+        if "cloudflare.com" in url or any(domain in url for domain in self._known_cloudflare_sites()):
+            cloudflare_headers = {
+                "Upgrade-Insecure-Requests": "1",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Cache-Control": "max-age=0",
+                "sec-ch-ua": '"Google Chrome";v="113", "Chromium";v="113", "Not-A.Brand";v="24"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-User": "?1",
+                "Sec-Fetch-Dest": "document"
+            }
+            request_headers.update(cloudflare_headers)
+            
+            # For Cloudflare sites, always send cookies
+            self.session.cookies.clear()
+            self.session.cookies.update(self.cookie_jar)
+        
+        # If private mode, don't send cookies (except for Cloudflare sites)
+        elif self.config_manager.private_mode:
             self.session.cookies.clear()
         
+        # Set special options for Cloudflare
+        cloudflare_options = {}
+        if "cloudflare.com" in url or any(domain in url for domain in self._known_cloudflare_sites()):
+            cloudflare_options["allow_redirects"] = True
+            cloudflare_options["timeout"] = 60  # Longer timeout for Cloudflare challenges
+        else:
+            cloudflare_options["allow_redirects"] = True
+            cloudflare_options["timeout"] = 30
+        
         # Perform the request
-        response = self.session.get(
-            url,
-            headers=request_headers,
-            timeout=30  # 30 second timeout
-        )
-        
-        # Log response info
-        logger.debug(f"Response: {response.status_code} - {url}")
-        
-        # Save cookies if not in private mode
-        if not self.config_manager.private_mode:
-            self.cookie_jar.update(response.cookies)
-        
-        return response
+        try:
+            response = self.session.get(
+                url,
+                headers=request_headers,
+                **cloudflare_options
+            )
+            
+            # Log response info
+            logger.debug(f"Response: {response.status_code} - {url}")
+            
+            # Save cookies if not in private mode or if Cloudflare site
+            if not self.config_manager.private_mode or "cloudflare.com" in url or any(domain in url for domain in self._known_cloudflare_sites()):
+                self.cookie_jar.update(response.cookies)
+                
+            # Handle Cloudflare server-side redirects
+            if response.status_code in (503, 403) and ('cloudflare' in response.text.lower() or 'cf-ray' in response.headers):
+                logger.info("Detected Cloudflare challenge, attempting to handle")
+                # Simply retry once with the cookies we've received
+                return self.get(url, request_headers)
+                
+            return response
+            
+        except requests.RequestException as e:
+            logger.error(f"Request error: {e}")
+            raise
+    
+    def _known_cloudflare_sites(self) -> List[str]:
+        """Return a list of known Cloudflare-protected domains."""
+        return [
+            "nodemixaholic.com",
+            "discord.com",
+            "cloudflareinsights.com",
+            # Add other known Cloudflare sites as you encounter them
+        ]
     
     def post(self, url: str, data: Any = None, headers: Optional[Dict[str, str]] = None) -> requests.Response:
         """

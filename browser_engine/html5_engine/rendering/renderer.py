@@ -465,21 +465,75 @@ class HTML5Renderer:
         
         logger.debug(f"Creating text with font: {font}, color: {color}")
         
-        # Create text item
-        try:
-            text_item = self.canvas.create_text(
-                x, y,
-                text=text,
-                font=font,
-                fill=color,
-                anchor='nw',
-                width=layout_box.box_metrics.width,
-                tags=f'element:{element.id}' if element.id else ''
-            )
-            logger.debug(f"Created text item with ID: {text_item}")
-            self.canvas_items.append(text_item)
-        except Exception as e:
-            logger.error(f"Error creating text item: {str(e)}")
+        # Calculate available width for text wrapping
+        available_width = layout_box.box_metrics.width
+        
+        # Split text into lines that fit within the available width
+        lines = []
+        current_line = ""
+        words = text.split()
+        
+        # Create a temporary canvas text item to measure text dimensions
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            # Create a test text item to check dimensions
+            test_item = self.canvas.create_text(0, 0, text=test_line, font=font, anchor='nw')
+            bbox = self.canvas.bbox(test_item)
+            self.canvas.delete(test_item)
+            
+            if bbox and (bbox[2] - bbox[0]) <= available_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+        
+        # Render each line with proper vertical spacing
+        line_height = 0
+        current_y = y
+        
+        for i, line in enumerate(lines):
+            # Create text item for this line
+            try:
+                text_item = self.canvas.create_text(
+                    x, current_y,
+                    text=line,
+                    font=font,
+                    fill=color,
+                    anchor='nw',
+                    tags=f'element:{element.id}' if element.id else ''
+                )
+                
+                # Get line dimensions for calculating next line position
+                bbox = self.canvas.bbox(text_item)
+                if bbox:
+                    # Use actual line height for spacing
+                    if i == 0:
+                        line_height = max(bbox[3] - bbox[1], 1.2 * self.fonts['default'][1])
+                    
+                    # Move to next line position
+                    current_y += line_height
+                
+                # Apply text-align CSS property
+                text_align = styles.get('text-align', 'left')
+                if text_align in ('center', 'right') and bbox:
+                    line_width = bbox[2] - bbox[0]
+                    if text_align == 'center':
+                        # Move text to center position
+                        new_x = x + (available_width - line_width) / 2
+                        self.canvas.coords(text_item, new_x, bbox[1])
+                    elif text_align == 'right':
+                        # Move text to right-aligned position
+                        new_x = x + available_width - line_width
+                        self.canvas.coords(text_item, new_x, bbox[1])
+                
+                logger.debug(f"Created text item with ID: {text_item}")
+                self.canvas_items.append(text_item)
+            except Exception as e:
+                logger.error(f"Error creating text item: {str(e)}")
     
     def _render_image_element(self, layout_box: LayoutBox) -> None:
         """

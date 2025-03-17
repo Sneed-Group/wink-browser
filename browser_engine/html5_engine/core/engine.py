@@ -375,9 +375,13 @@ class HTML5Engine:
             self.logger.warning("Cannot render: document is missing")
             return
             
-        if not hasattr(self, 'layout') or self.layout is None:
-            self.logger.warning("Cannot render: layout is missing")
-            return
+        if not hasattr(self, 'layout_tree') or self.layout_tree is None:
+            self.logger.warning("Cannot render: layout_tree is missing")
+            if hasattr(self, 'document') and self.document:
+                self.logger.info("Calculating layout before rendering")
+                self._calculate_layout()
+            else:
+                return
             
         if not self.renderer:
             self.logger.error("Cannot render: renderer is not initialized")
@@ -390,8 +394,8 @@ class HTML5Engine:
             self.renderer.clear()
             
             # Render the document using the calculated layout
-            self.logger.debug(f"Passing layout to renderer: {self.layout}")
-            self.renderer.render(self.document, self.layout)
+            self.logger.debug(f"Passing layout_tree to renderer: {self.layout_tree}")
+            self.renderer.render(self.document, self.layout_tree)
             self.logger.info("Document rendered successfully")
             
             # Trigger load event handlers

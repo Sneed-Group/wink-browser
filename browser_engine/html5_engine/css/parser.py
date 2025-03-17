@@ -45,6 +45,47 @@ class CSSParser:
         # Default browser style sheet
         self._user_agent_stylesheet = None
         
+        # Initialize property dictionaries
+        self.rules = []
+        
+        # Default properties that should be recognized
+        self.recognized_properties = {
+            # Box model properties
+            'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+            'border', 'border-width', 'border-style', 'border-color',
+            'border-top', 'border-right', 'border-bottom', 'border-left',
+            'border-radius',
+            
+            # Layout properties
+            'display', 'position', 'top', 'right', 'bottom', 'left',
+            'float', 'clear', 'z-index', 'overflow', 'visibility',
+            
+            # Text properties
+            'color', 'font-family', 'font-size', 'font-weight', 'font-style',
+            'text-align', 'text-decoration', 'text-transform', 'line-height',
+            'letter-spacing', 'word-spacing', 'white-space', 'vertical-align',
+            
+            # Background properties
+            'background', 'background-color', 'background-image', 'background-repeat',
+            'background-position', 'background-size', 'background-attachment',
+            
+            # Flexbox properties
+            'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'justify-content',
+            'align-items', 'align-content', 'order', 'flex-grow', 'flex-shrink', 'flex-basis',
+            'align-self',
+            
+            # List properties
+            'list-style', 'list-style-type', 'list-style-position', 'list-style-image',
+            
+            # Table properties
+            'border-collapse', 'border-spacing', 'caption-side', 'empty-cells', 'table-layout',
+            
+            # Other properties
+            'cursor', 'opacity', 'transition', 'transform', 'animation', 'user-select'
+        }
+        
         logger.debug("CSS Parser initialized with full CSS3 support")
     
     def parse(self, css_content: str, base_url: Optional[str] = None) -> css.CSSStyleSheet:
@@ -90,28 +131,7 @@ class CSSParser:
         Returns:
             Dictionary of CSS properties
         """
-        style_dict = {}
-        
-        try:
-            style = cssutils.parseStyle(style_attr)
-            
-            for prop in style:
-                if prop.name and prop.value:
-                    style_dict[prop.name.lower()] = prop.value
-        
-        except Exception as e:
-            logger.error(f"Error parsing inline styles: {e}")
-            
-            # Fallback to simple parsing
-            declarations = [decl.strip() for decl in style_attr.split(';') if decl.strip()]
-            
-            for declaration in declarations:
-                parts = declaration.split(':', 1)
-                if len(parts) == 2:
-                    prop_name, value = parts
-                    style_dict[prop_name.strip().lower()] = value.strip()
-        
-        return style_dict
+        return self._parse_declaration(style_attr)
     
     def resolve_urls(self, stylesheet: css.CSSStyleSheet, base_url: str) -> None:
         """
@@ -531,4 +551,84 @@ class CSSParser:
         Returns:
             Sorted list of selectors (lowest to highest specificity)
         """
-        return sorted(selectors, key=self.specificity) 
+        return sorted(selectors, key=self.specificity)
+    
+    def _parse_declaration(self, declaration: str) -> Dict[str, str]:
+        """
+        Parse a CSS declaration.
+        
+        Args:
+            declaration: CSS declaration string (e.g., "color: red; font-size: 12px")
+            
+        Returns:
+            Dictionary of CSS properties and values
+        """
+        if not declaration:
+            return {}
+            
+        properties = {}
+        
+        # Split declarations by semicolon
+        for prop in declaration.split(';'):
+            if not prop.strip():
+                continue
+                
+            # Split property and value by colon
+            parts = prop.split(':', 1)
+            if len(parts) != 2:
+                continue
+                
+            property_name = parts[0].strip().lower()
+            property_value = parts[1].strip()
+            
+            # Validate and process property
+            processed_value = self._process_property_value(property_name, property_value)
+            if processed_value is not None:
+                properties[property_name] = processed_value
+            
+        return properties
+    
+    def _process_property_value(self, property_name: str, property_value: str) -> Optional[str]:
+        """
+        Process and validate a CSS property value.
+        
+        Args:
+            property_name: CSS property name
+            property_value: CSS property value
+            
+        Returns:
+            Processed property value, or None if invalid
+        """
+        # Check if property is recognized
+        if property_name not in self.recognized_properties:
+            logger.debug(f"Unrecognized CSS property: {property_name}")
+            return None
+        
+        # Process specific properties
+        if property_name == 'text-align':
+            # Validate text-align values
+            valid_values = ['left', 'center', 'right', 'justify']
+            if property_value.lower() in valid_values:
+                return property_value.lower()
+            return 'left'  # Default value
+        
+        # Handle color properties
+        elif property_name in ['color', 'background-color', 'border-color']:
+            # Simple color name validation
+            return property_value
+        
+        # Handle font properties
+        elif property_name == 'font-weight':
+            # Normalize font weight
+            if property_value.lower() in ['bold', 'bolder', '700', '800', '900']:
+                return 'bold'
+            return 'normal'
+            
+        elif property_name == 'font-style':
+            # Normalize font style
+            if property_value.lower() == 'italic':
+                return 'italic'
+            return 'normal'
+            
+        # Pass through other properties
+        return property_value 
