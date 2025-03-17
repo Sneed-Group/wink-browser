@@ -90,6 +90,11 @@ class JSEngine:
     
     def _setup_browser_env(self, interpreter):
         """Set up a basic browser-like environment in the interpreter."""
+        # Register Python callbacks for console methods
+        interpreter.export_function("_console_log", self._console_log)
+        interpreter.export_function("_console_error", self._console_error)
+        interpreter.export_function("_console_warn", self._console_warn)
+        
         # Basic window object
         window_setup = """
         var window = {
@@ -104,9 +109,21 @@ class JSEngine:
                 pathname: "blank"
             },
             console: {
-                log: function(msg) { print(msg); return msg; },
-                error: function(msg) { print("ERROR: " + msg); return msg; },
-                warn: function(msg) { print("WARNING: " + msg); return msg; }
+                log: function(msg) { 
+                    print(msg); 
+                    _console_log(msg);
+                    return msg; 
+                },
+                error: function(msg) { 
+                    print("ERROR: " + msg); 
+                    _console_error(msg);
+                    return msg; 
+                },
+                warn: function(msg) { 
+                    print("WARNING: " + msg); 
+                    _console_warn(msg);
+                    return msg; 
+                }
             }
         };
         
@@ -160,6 +177,18 @@ class JSEngine:
         # Execute the setup scripts
         interpreter.evaljs(window_setup)
         interpreter.evaljs(document_setup)
+    
+    def _console_log(self, message: str) -> None:
+        """Handle console.log calls from JavaScript."""
+        logger.info(f"JS console.log: {message}")
+        
+    def _console_error(self, message: str) -> None:
+        """Handle console.error calls from JavaScript."""
+        logger.error(f"JS console.error: {message}")
+        
+    def _console_warn(self, message: str) -> None:
+        """Handle console.warn calls from JavaScript."""
+        logger.warning(f"JS console.warn: {message}")
     
     def execute_js(self, js_code: str, callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> Optional[Dict[str, Any]]:
         """
