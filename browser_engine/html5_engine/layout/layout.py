@@ -26,6 +26,7 @@ class LayoutBox:
         self.computed_style: Dict[str, str] = {}
         self.display = display
         self.box_metrics = BoxMetrics()
+        self.z_index = 0  # Default z-index
         
         # Set default display based on element tag if present
         if element and hasattr(element, 'tag_name'):
@@ -91,6 +92,17 @@ class LayoutBox:
         # Update display property from computed styles
         if 'display' in self.computed_style:
             self.display = self.computed_style['display']
+        
+        # Process z-index
+        if 'z-index' in self.computed_style:
+            try:
+                self.z_index = int(self.computed_style['z-index'])
+            except ValueError:
+                # If z-index is not a valid integer, default to 0
+                self.z_index = 0
+        elif self.parent:
+            # Inherit parent's z-index for stacking context
+            self.z_index = self.parent.z_index
         
         # Compute box metrics based on styles
         self._compute_box_metrics()
@@ -165,62 +177,47 @@ class LayoutBox:
         """
         Update box dimensions based on content, padding, border, and margin.
         """
+        # Ensure content dimensions are numeric
+        if self.box_metrics.content_width == 'auto':
+            self.box_metrics.content_width = 0
+        if self.box_metrics.content_height == 'auto':
+            self.box_metrics.content_height = 0
+        
         # Padding box dimensions
-        if self.box_metrics.content_width != 'auto':
-            self.box_metrics.padding_box_width = (
-                self.box_metrics.content_width + 
-                self.box_metrics.padding_left + 
-                self.box_metrics.padding_right
-            )
-        else:
-            self.box_metrics.padding_box_width = 'auto'
-            
-        if self.box_metrics.content_height != 'auto':
-            self.box_metrics.padding_box_height = (
-                self.box_metrics.content_height + 
-                self.box_metrics.padding_top + 
-                self.box_metrics.padding_bottom
-            )
-        else:
-            self.box_metrics.padding_box_height = 'auto'
+        self.box_metrics.padding_box_width = (
+            self.box_metrics.content_width + 
+            self.box_metrics.padding_left + 
+            self.box_metrics.padding_right
+        )
+        self.box_metrics.padding_box_height = (
+            self.box_metrics.content_height + 
+            self.box_metrics.padding_top + 
+            self.box_metrics.padding_bottom
+        )
         
         # Border box dimensions
-        if self.box_metrics.padding_box_width != 'auto':
-            self.box_metrics.border_box_width = (
-                self.box_metrics.padding_box_width + 
-                self.box_metrics.border_left_width + 
-                self.box_metrics.border_right_width
-            )
-        else:
-            self.box_metrics.border_box_width = 'auto'
-            
-        if self.box_metrics.padding_box_height != 'auto':
-            self.box_metrics.border_box_height = (
-                self.box_metrics.padding_box_height + 
-                self.box_metrics.border_top_width + 
-                self.box_metrics.border_bottom_width
-            )
-        else:
-            self.box_metrics.border_box_height = 'auto'
+        self.box_metrics.border_box_width = (
+            self.box_metrics.padding_box_width + 
+            self.box_metrics.border_left_width + 
+            self.box_metrics.border_right_width
+        )
+        self.box_metrics.border_box_height = (
+            self.box_metrics.padding_box_height + 
+            self.box_metrics.border_top_width + 
+            self.box_metrics.border_bottom_width
+        )
         
         # Margin box dimensions
-        if self.box_metrics.border_box_width != 'auto':
-            self.box_metrics.margin_box_width = (
-                self.box_metrics.border_box_width + 
-                self.box_metrics.margin_left + 
-                self.box_metrics.margin_right
-            )
-        else:
-            self.box_metrics.margin_box_width = 'auto'
-            
-        if self.box_metrics.border_box_height != 'auto':
-            self.box_metrics.margin_box_height = (
-                self.box_metrics.border_box_height + 
-                self.box_metrics.margin_top + 
-                self.box_metrics.margin_bottom
-            )
-        else:
-            self.box_metrics.margin_box_height = 'auto'
+        self.box_metrics.margin_box_width = (
+            self.box_metrics.border_box_width + 
+            self.box_metrics.margin_left + 
+            self.box_metrics.margin_right
+        )
+        self.box_metrics.margin_box_height = (
+            self.box_metrics.border_box_height + 
+            self.box_metrics.margin_top + 
+            self.box_metrics.margin_bottom
+        )
     
     def _parse_dimension_value(self, value: str) -> Union[int, str]:
         """
@@ -272,54 +269,65 @@ class LayoutBox:
     
     def layout(self, container_width: int, x: int = 0, y: int = 0) -> None:
         """
-        Perform layout calculations for this box and its children.
+        Perform layout for this box and its children.
         
         Args:
             container_width: Width of the containing block
-            x: Initial x position
-            y: Initial y position
+            x: Starting x position
+            y: Starting y position
         """
         # Set initial position
         self.box_metrics.x = x
         self.box_metrics.y = y
         
-        # Handle positioning
+        # Calculate dimensions based on styles
+        self._calculate_width(container_width)
+        self._calculate_height()
+        
+        # Apply position if set
         position = self.computed_style.get('position', 'static')
         
         if position == 'relative':
-            # Apply relative offsets if specified
+            # Adjust position relative to normal flow
             left = self._parse_dimension_value(self.computed_style.get('left', '0'))
-            right = self._parse_dimension_value(self.computed_style.get('right', '0'))
             top = self._parse_dimension_value(self.computed_style.get('top', '0'))
-            bottom = self._parse_dimension_value(self.computed_style.get('bottom', '0'))
             
-            if left != 'auto':
+            if isinstance(left, int):
                 self.box_metrics.x += left
-            elif right != 'auto':
-                # Only apply right if left is not specified
-                self.box_metrics.x -= right
-            
-            if top != 'auto':
+            if isinstance(top, int):
                 self.box_metrics.y += top
-            elif bottom != 'auto':
-                # Only apply bottom if top is not specified
-                self.box_metrics.y -= bottom
+        elif position == 'absolute':
+            # Position relative to nearest positioned ancestor
+            # For simplicity, we're positioning relative to the viewport
+            left = self._parse_dimension_value(self.computed_style.get('left', '0'))
+            top = self._parse_dimension_value(self.computed_style.get('top', '0'))
+            
+            if isinstance(left, int):
+                self.box_metrics.x = left
+            if isinstance(top, int):
+                self.box_metrics.y = top
+        elif position == 'fixed':
+            # Position relative to viewport
+            left = self._parse_dimension_value(self.computed_style.get('left', '0'))
+            top = self._parse_dimension_value(self.computed_style.get('top', '0'))
+            
+            if isinstance(left, int):
+                self.box_metrics.x = left
+            if isinstance(top, int):
+                self.box_metrics.y = top
         
-        # Compute content dimensions
-        self._calculate_width(container_width)
-        
-        # Handle different display types
-        if self.display == 'inline':
+        # Layout based on display type
+        if self.display == 'block':
+            self._layout_block(container_width)
+        elif self.display == 'inline':
             self._layout_inline(container_width)
         elif self.display == 'inline-block':
             self._layout_inline_block(container_width)
         elif self.display == 'flex':
             self._layout_flex(container_width)
-        else:  # Default to block
-            self._layout_block(container_width)
-        
-        # Calculate height based on content and specified height
-        self._calculate_height()
+            
+        # Sort children by z-index for proper rendering order
+        self.children.sort(key=lambda child: child.z_index)
     
     def _calculate_width(self, container_width: int) -> None:
         """
@@ -336,6 +344,14 @@ class LayoutBox:
                 total_padding = self.box_metrics.padding_left + self.box_metrics.padding_right
                 total_border = self.box_metrics.border_left_width + self.box_metrics.border_right_width
                 
+                # Handle the case where some values might be 'auto'
+                if isinstance(total_margin, str) and total_margin == 'auto':
+                    total_margin = 0
+                if isinstance(total_padding, str) and total_padding == 'auto':
+                    total_padding = 0
+                if isinstance(total_border, str) and total_border == 'auto':
+                    total_border = 0
+                
                 # Content width fills available space
                 self.box_metrics.content_width = container_width - total_margin - total_padding - total_border
         
@@ -347,6 +363,9 @@ class LayoutBox:
                     # Approximate width based on text length (very simple approach)
                     text_length = len(self.element.text_content)
                     font_size = self._parse_dimension_value(self.computed_style.get('font-size', '16px'))
+                    if font_size == 'auto':
+                        font_size = 16  # Default font size
+                        
                     # Rough estimate: each character is about 0.6 times the font size width
                     self.box_metrics.content_width = int(text_length * font_size * 0.6)
                 else:
@@ -585,3 +604,181 @@ class LayoutBox:
                 
                 # Move to next position
                 current_y += child.box_metrics.margin_box_height 
+
+class LayoutEngine:
+    """
+    Engine for calculating layout of HTML documents.
+    
+    Handles creating a layout tree from a DOM tree and computing positions and sizes.
+    """
+    
+    def __init__(self, viewport_width: int = 800, viewport_height: int = 600):
+        """
+        Initialize the layout engine.
+        
+        Args:
+            viewport_width: Width of the viewport
+            viewport_height: Height of the viewport
+        """
+        self.viewport_width = viewport_width
+        self.viewport_height = viewport_height
+        self.layout_root = None
+    
+    def create_layout(self, document, viewport_width: int = None, viewport_height: int = None) -> Optional[LayoutBox]:
+        """
+        Create a layout tree from a document.
+        
+        Args:
+            document: The document to create layout for
+            viewport_width: Optional viewport width override
+            viewport_height: Optional viewport height override
+            
+        Returns:
+            Root of the layout tree
+        """
+        if viewport_width is not None:
+            self.viewport_width = viewport_width
+        if viewport_height is not None:
+            self.viewport_height = viewport_height
+            
+        if not document or not document.document_element:
+            return None
+            
+        # Create the layout tree
+        self.layout_root = self._build_layout_tree(document.document_element)
+        
+        # Compute styles
+        self.layout_root.compute_styles()
+        
+        # Perform layout
+        self.layout_root.layout(self.viewport_width)
+        
+        return self.layout_root
+    
+    def _build_layout_tree(self, element) -> LayoutBox:
+        """
+        Build a layout tree from an element tree.
+        
+        Args:
+            element: The root element
+            
+        Returns:
+            Root of the layout tree
+        """
+        # Create a layout box for this element
+        layout_box = LayoutBox(element)
+        
+        # Recursively add children
+        for child in element.child_nodes:
+            # Skip non-element nodes for now (like text, comments, etc.)
+            if hasattr(child, 'node_type') and child.node_type == 1:  # ELEMENT_NODE
+                child_box = self._build_layout_tree(child)
+                layout_box.add_child(child_box)
+            elif hasattr(child, 'node_type') and child.node_type == 3:  # TEXT_NODE
+                # Handle text nodes specially
+                # In a real browser, we would create anonymous boxes for text
+                # For simplicity, we'll just include the text in the parent's content
+                if hasattr(layout_box.element, 'text_content'):
+                    layout_box.element.text_content += child.node_value
+        
+        return layout_box
+    
+    def _calculate_box_dimensions(self, layout_box: LayoutBox) -> None:
+        """
+        Calculate dimensions for a layout box.
+        
+        Args:
+            layout_box: Layout box to calculate dimensions for
+        """
+        # Check if content dimensions are specified in the style
+        styles = layout_box.computed_style
+        
+        # Get width and height from styles
+        width = self._parse_dimension(styles.get('width', 'auto'))
+        height = self._parse_dimension(styles.get('height', 'auto'))
+        
+        # Calculate box model properties
+        margin_top = self._parse_dimension(styles.get('margin-top', '0'))
+        margin_right = self._parse_dimension(styles.get('margin-right', '0'))
+        margin_bottom = self._parse_dimension(styles.get('margin-bottom', '0'))
+        margin_left = self._parse_dimension(styles.get('margin-left', '0'))
+        
+        padding_top = self._parse_dimension(styles.get('padding-top', '0'))
+        padding_right = self._parse_dimension(styles.get('padding-right', '0'))
+        padding_bottom = self._parse_dimension(styles.get('padding-bottom', '0'))
+        padding_left = self._parse_dimension(styles.get('padding-left', '0'))
+        
+        border_top = self._parse_dimension(styles.get('border-top-width', '0'))
+        border_right = self._parse_dimension(styles.get('border-right-width', '0'))
+        border_bottom = self._parse_dimension(styles.get('border-bottom-width', '0'))
+        border_left = self._parse_dimension(styles.get('border-left-width', '0'))
+        
+        # Update the box metrics
+        layout_box.box_metrics.width = width
+        layout_box.box_metrics.height = height
+        
+        layout_box.box_metrics.margin_top = margin_top
+        layout_box.box_metrics.margin_right = margin_right
+        layout_box.box_metrics.margin_bottom = margin_bottom
+        layout_box.box_metrics.margin_left = margin_left
+        
+        layout_box.box_metrics.padding_top = padding_top
+        layout_box.box_metrics.padding_right = padding_right
+        layout_box.box_metrics.padding_bottom = padding_bottom
+        layout_box.box_metrics.padding_left = padding_left
+        
+        layout_box.box_metrics.border_top_width = border_top
+        layout_box.box_metrics.border_right_width = border_right
+        layout_box.box_metrics.border_bottom_width = border_bottom
+        layout_box.box_metrics.border_left_width = border_left
+        
+        # Update box dimensions
+        layout_box._update_box_dimensions()
+    
+    def _parse_dimension(self, value: str) -> Union[int, str]:
+        """
+        Parse a CSS dimension value.
+        
+        Args:
+            value: CSS dimension value
+            
+        Returns:
+            Parsed value (int or 'auto')
+        """
+        if not value or value == 'auto':
+            return 'auto'
+            
+        # Parse pixel values
+        if value.endswith('px'):
+            try:
+                return int(float(value[:-2]))
+            except ValueError:
+                return 0
+                
+        # Parse percentage values (convert to viewport-relative)
+        elif value.endswith('%'):
+            try:
+                percentage = float(value[:-1]) / 100.0
+                return int(self.viewport_width * percentage)
+            except ValueError:
+                return 0
+                
+        # Parse em values (assuming 1em = 16px for simplicity)
+        elif value.endswith('em'):
+            try:
+                return int(float(value[:-2]) * 16)
+            except ValueError:
+                return 0
+                
+        # Parse rem values (assuming 1rem = 16px for simplicity)
+        elif value.endswith('rem'):
+            try:
+                return int(float(value[:-3]) * 16)
+            except ValueError:
+                return 0
+                
+        # If it's just a number, assume pixels
+        try:
+            return int(float(value))
+        except ValueError:
+            return 0 

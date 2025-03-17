@@ -98,75 +98,111 @@ class MediaHandler:
             return (cache_path, self.image_cache[cache_key])
             
         if os.path.exists(cache_path):
-            logger.debug(f"Image {url} found in disk cache at {cache_path}")
             try:
                 # Load image from disk cache
+                logger.debug(f"Loading image {url} from disk cache")
                 image = Image.open(cache_path)
+                image.load()  # Ensure image is fully loaded
+                
+                # Store in memory cache
                 self.image_cache[cache_key] = image
+                self.loaded_media[url] = image
+                
                 if callback:
                     callback(url, image)
+                    
                 return (cache_path, image)
             except Exception as e:
-                logger.warning(f"Failed to load image from cache: {e}")
-                # Fall through to download the image again
+                logger.warning(f"Failed to load cached image {url}: {e}")
+                # If loading from cache fails, try downloading again
+                pass
+                
+        # Need to download the image
+        # Check if already downloading
+        with self._lock:
+            if url in self.ongoing_downloads:
+                if callback:
+                    # Add callback to be called when download completes
+                    self.ongoing_downloads[url].append(callback)
+                return None
+            else:
+                # Mark as downloading
+                self.ongoing_downloads[url] = [callback] if callback else []
         
-        # Start a thread to download and process the image
-        thread = threading.Thread(
+        # Start download thread
+        download_thread = threading.Thread(
             target=self._load_image_thread,
             args=(url, callback),
             daemon=True
         )
-        thread.start()
-        self.active_threads.append(thread)
+        download_thread.start()
+        self.active_threads.append(download_thread)
         
-        # Return None immediately, callback will be called when image is loaded
         return None
     
     def _load_image_thread(self, url: str, callback: Any) -> None:
         """
-        Thread function to load an image from a URL.
+        Thread function to load an image.
         
         Args:
             url: URL of the image
             callback: Callback function to call when image is loaded
         """
         try:
-            logger.debug(f"Loading image from {url}")
+            logger.debug(f"Downloading image from {url}")
             
-            # Download the image
-            cache_path = self._download_file(url)
-            if not cache_path:
-                logger.warning(f"Failed to download image from {url}")
-                if callback:
-                    callback(url, None)
-                return
+            # Get cache path
+            cache_key = self._get_cache_key(url)
+            cache_path = os.path.join(self.cache_dir, cache_key)
+            
+            # Download to cache
+            if url.startswith('data:'):
+                # Handle data URLs
+                saved_path = self._handle_data_url(url, cache_path)
+            else:
+                # Handle regular URLs
+                saved_path = self._download_file(url)
                 
-            # Load the image using PIL
-            try:
-                image = Image.open(cache_path)
-                
-                # Store in memory cache
-                cache_key = self._get_cache_key(url)
-                self.image_cache[cache_key] = image
-                
-                # Call the callback with the loaded image
-                if callback:
-                    callback(url, image)
+                # If download succeeded, move to cache
+                if saved_path and os.path.exists(saved_path):
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    shutil.move(saved_path, cache_path)
+                    saved_path = cache_path
+            
+            if saved_path and os.path.exists(saved_path):
+                try:
+                    # Load the image
+                    image = Image.open(saved_path)
+                    image.load()  # Ensure image is fully loaded
                     
-                logger.debug(f"Successfully loaded image from {url}")
-            except Exception as e:
-                logger.warning(f"Failed to process image from {url}: {e}")
-                if callback:
-                    callback(url, None)
+                    # Store in caches
+                    self.image_cache[cache_key] = image
+                    self.loaded_media[url] = image
+                    
+                    # Call all registered callbacks
+                    with self._lock:
+                        callbacks = self.ongoing_downloads.pop(url, [])
+                        
+                    for cb in callbacks:
+                        if cb:
+                            try:
+                                cb(url, image)
+                            except Exception as e:
+                                logger.error(f"Error in image callback for {url}: {e}")
+                                
+                except Exception as e:
+                    logger.error(f"Failed to load downloaded image {url}: {e}")
+                    with self._lock:
+                        self.ongoing_downloads.pop(url, None)
+            else:
+                logger.warning(f"Failed to download image {url}")
+                with self._lock:
+                    self.ongoing_downloads.pop(url, None)
+                    
         except Exception as e:
-            logger.error(f"Error in image loading thread for {url}: {e}")
-            if callback:
-                callback(url, None)
-        finally:
-            # Remove this thread from active threads
-            for thread in self.active_threads[:]:
-                if not thread.is_alive():
-                    self.active_threads.remove(thread)
+            logger.error(f"Error downloading image {url}: {e}")
+            with self._lock:
+                self.ongoing_downloads.pop(url, None)
     
     def load_video(self, url: str, callback: Any = None) -> Optional[str]:
         """

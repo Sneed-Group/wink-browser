@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Browser Engine Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        img {
+            max-width: 300px;
+        }
+        .test-div {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Browser Engine Test Page</h1>
+    <p>This is a test page to verify the browser engine's rendering capabilities.</p>
+    
+    <h2>Heading Level 2</h2>
+    <p>Text following a heading should have proper spacing between the heading and text.</p>
+    
+    <h3>Heading Level 3</h3>
+    <p>Another paragraph of text to test spacing between elements.</p>
+    
+    <div class="test-div">
+        <p>Text inside a div element.</p>
+        <p>Another paragraph inside the same div.</p>
+    </div>
+    
+    <h4>Image Test</h4>
+    <!-- Absolute URL image -->
+    <p>Image with absolute URL:</p>
+    <img src="https://example.com/images/example.png" alt="Example Image (absolute)">
+    
+    <!-- Relative URL image -->
+    <p>Image with relative URL:</p>
+    <img src="/images/example.png" alt="Example Image (relative with leading slash)">
+    
+    <h4>List Test</h4>
+    <ul>
+        <li>List item 1</li>
+        <li>List item 2</li>
+        <li>List item 3</li>
+    </ul>
+    
+    <h4>JavaScript Test</h4>
+    <script>
+        // This script should not be rendered as visible text
+        console.log("Hello, World!");
+    </script>
+    
+    <p>Text after script - this should render normally.</p>
+    
+    <h4>Input Elements Test</h4>
+    <form>
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name"><br><br>
+        
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email"><br><br>
+        
+        <button type="button">Click Me</button>
+    </form>
+    
+    <h5>Heading Level 5</h5>
+    <p>Testing smaller heading levels.</p>
+    
+    <h6>Heading Level 6</h6>
+    <p>The smallest heading level test.</p>
+</body>
+</html> 

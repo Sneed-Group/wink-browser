@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any, Union, Set
 import re
 from .node import Node, NodeType
 from .attr import Attr
+import logging
 
 class Element(Node):
     """
@@ -51,6 +52,11 @@ class Element(Node):
             'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
             'link', 'meta', 'param', 'source', 'track', 'wbr'
         }
+        
+        # Add JavaScript-style aliases for common methods
+        self.querySelector = self.query_selector
+        self.querySelectorAll = self.query_selector_all
+        self._textContent = None
     
     @property
     def id(self) -> str:
@@ -129,26 +135,50 @@ class Element(Node):
     
     @property
     def text_content(self) -> str:
-        """Get or set the text content of the element."""
-        result = []
+        """
+        Get the text content of this element and its descendants.
+        
+        Returns:
+            The concatenated text content of this element and its descendants
+        """
+        # For leaf nodes, just return the text directly without recursion
+        if not self.has_child_nodes():
+            for attr in self.attributes.values():
+                if attr.node_name == 'text':
+                    return attr.node_value or ""
+            return ""
+        
+        # For non-leaf nodes, collect text from child text nodes only
+        # Don't recurse through child elements to avoid duplication
+        text = []
         for child in self.child_nodes:
             if child.node_type == NodeType.TEXT_NODE:
-                result.append(child.node_value or "")
-            elif child.node_type == NodeType.ELEMENT_NODE:
-                result.append(child.text_content or "")
+                if hasattr(child, 'node_value') and child.node_value:
+                    text.append(child.node_value)
         
-        return "".join(result)
+        return "".join(text)
     
     @text_content.setter
     def text_content(self, text: str) -> None:
-        """Set the text content of the element."""
-        # Remove all existing children
+        """
+        Set the text content of this element, replacing all existing children
+        with a single text node.
+        
+        Args:
+            text: The new text content
+        """
+        # Clear all existing children
         for child in list(self.child_nodes):
             self.remove_child(child)
         
-        # Create and add a new text node
-        if self.owner_document and text:
+        # Create a new text node
+        if self.owner_document:
             text_node = self.owner_document.create_text_node(text)
+            self.append_child(text_node)
+        else:
+            # Fallback if no document is available
+            from .text import Text
+            text_node = Text(text, self.owner_document)
             self.append_child(text_node)
     
     @property
@@ -342,26 +372,45 @@ class Element(Node):
         Returns:
             List of matching elements
         """
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"Element.get_elements_by_tag_name('{tag_name}') called on {self.tag_name}")
+        logger.debug(f"This element has {len(self.child_nodes)} direct children")
+        
         tag_name_lower = tag_name.lower()
         result = []
         
         # Special case for "*" which matches all elements
         match_all = tag_name == "*"
         
+        # Add this element itself if it matches (fixed: previously this node was excluded)
+        if match_all or self.tag_name.lower() == tag_name_lower:
+            result.append(self)
+            logger.debug(f"Added self ({self.tag_name}) to result")
+        
         def collect_elements(node: Node) -> None:
-            if node.node_type == NodeType.ELEMENT_NODE:
+            if not node:
+                return
+                
+            if hasattr(node, 'node_type') and node.node_type == NodeType.ELEMENT_NODE:
                 element = node
                 if match_all or element.tag_name.lower() == tag_name_lower:
                     result.append(element)
+                    logger.debug(f"Found matching element: {element.tag_name}")
                 
                 # Recursively check children
-                for child in node.child_nodes:
-                    collect_elements(child)
+                if hasattr(node, 'child_nodes'):
+                    child_count = len(node.child_nodes)
+                    logger.debug(f"Checking {child_count} children of {element.tag_name}")
+                    for child in node.child_nodes:
+                        collect_elements(child)
         
         # Start the recursion with this element's children
+        logger.debug(f"Starting element collection with {len(self.child_nodes)} children")
         for child in self.child_nodes:
             collect_elements(child)
         
+        logger.debug(f"Element.get_elements_by_tag_name('{tag_name}') found {len(result)} elements")
         return result
     
     def get_elements_by_class_name(self, class_name: str) -> List['Element']:
@@ -684,4 +733,14 @@ class Element(Node):
             if tag == 'pre':
                 default_styles['white-space'] = 'pre'
         
-        return default_styles 
+        return default_styles
+
+    @property
+    def textContent(self) -> str:
+        """Get or set the text content in JavaScript style."""
+        return self.text_content
+        
+    @textContent.setter
+    def textContent(self, value: str) -> None:
+        """Set the text content in JavaScript style."""
+        self.text_content = value 

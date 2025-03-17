@@ -38,6 +38,12 @@ class FloatType(Enum):
     LEFT = "left"
     RIGHT = "right"
 
+class BoxType(Enum):
+    """CSS box type enum for layout boxes."""
+    BLOCK = "block"
+    INLINE = "inline"
+    INLINE_BLOCK = "inline-block"
+
 class BoxMetrics:
     """
     Container for box model metrics.
@@ -50,6 +56,10 @@ class BoxMetrics:
         # Content box dimensions
         self.width: Optional[int] = None
         self.height: Optional[int] = None
+        
+        # Content dimensions (may differ from width/height due to box-sizing)
+        self.content_width: Union[int, str] = 'auto'
+        self.content_height: Union[int, str] = 'auto'
         
         # Padding (top, right, bottom, left)
         self.padding_top: int = 0
@@ -114,18 +124,21 @@ class LayoutBox:
     Stores layout information for a DOM element.
     """
     
-    def __init__(self, element: Optional[Element] = None):
+    def __init__(self, element: Optional[Element] = None, display: DisplayType = DisplayType.BLOCK, parent: Optional['LayoutBox'] = None):
         """
         Initialize a layout box for an element.
         
         Args:
             element: The DOM element to create a layout box for
+            display: The display type for the layout box
+            parent: The parent layout box
         """
         self.element = element
         self.box_metrics = BoxMetrics()
         
         # Layout properties
-        self.display: DisplayType = DisplayType.BLOCK
+        self.display: DisplayType = display
+        self.box_type: BoxType = BoxType.BLOCK  # Default to BLOCK box type
         self.position: PositionType = PositionType.STATIC
         self.float_type: FloatType = FloatType.NONE
         
@@ -136,7 +149,7 @@ class LayoutBox:
         self.children: List[LayoutBox] = []
         
         # Parent layout box
-        self.parent: Optional[LayoutBox] = None
+        self.parent: Optional[LayoutBox] = parent
     
     def add_child(self, child: 'LayoutBox') -> None:
         """
@@ -147,6 +160,21 @@ class LayoutBox:
         """
         self.children.append(child)
         child.parent = self
+        
+    def _update_box_dimensions(self) -> None:
+        """
+        Update box dimensions based on content dimensions.
+        
+        This method updates the box dimensions based on the content dimensions,
+        taking into account padding, border, and margin.
+        """
+        # If content width is a number, use it to calculate width
+        if isinstance(self.box_metrics.content_width, (int, float)):
+            self.box_metrics.width = self.box_metrics.content_width
+        
+        # If content height is a number, use it to calculate height
+        if isinstance(self.box_metrics.content_height, (int, float)):
+            self.box_metrics.height = self.box_metrics.content_height
 
 class LayoutEngine:
     """
@@ -158,6 +186,191 @@ class LayoutEngine:
     def __init__(self):
         """Initialize the layout engine."""
         logger.debug("Layout Engine initialized")
+    
+    def create_layout(self, document, viewport_width: int = None, viewport_height: int = None) -> Optional[LayoutBox]:
+        """
+        Create a layout tree from a document.
+        
+        Args:
+            document: Document to create layout for
+            viewport_width: Optional viewport width override
+            viewport_height: Optional viewport height override
+            
+        Returns:
+            Root layout box or None if document is invalid
+        """
+        if viewport_width is not None:
+            self.viewport_width = viewport_width
+        if viewport_height is not None:
+            self.viewport_height = viewport_height
+            
+        if not document or not hasattr(document, 'document_element') or not document.document_element:
+            return None
+            
+        # Build layout tree from DOM
+        layout_tree = self._build_layout_tree(document.document_element)
+        
+        # Apply styles
+        layout_tree.compute_styles()
+        
+        # Apply layout
+        self.layout(layout_tree, self.viewport_width, self.viewport_height)
+        
+        return layout_tree
+        
+    def layout(self, layout_box: LayoutBox, viewport_width: int, viewport_height: int) -> None:
+        """
+        Apply layout to a layout tree.
+        
+        Args:
+            layout_box: Root layout box
+            viewport_width: Viewport width
+            viewport_height: Viewport height
+        """
+        # Update viewport dimensions
+        self.viewport_width = viewport_width
+        self.viewport_height = viewport_height
+        
+        # Apply layout starting at position (0, 0)
+        # Check if the layout_box has its own layout method
+        if hasattr(layout_box, 'layout') and callable(getattr(layout_box, 'layout')):
+            # Use the layout_box's own layout method
+            layout_box.layout(viewport_width, 0, 0)
+        else:
+            # Use our internal layout method as a fallback
+            self._layout_box(layout_box, 0, 0, viewport_width)
+            
+    def _layout_box(self, layout_box: LayoutBox, x: int, y: int, container_width: int) -> None:
+        """
+        Apply layout to a single box and its children.
+        
+        Args:
+            layout_box: Layout box to apply layout to
+            x: X position
+            y: Y position
+            container_width: Width of containing box
+        """
+        # Set position
+        layout_box.box_metrics.x = x
+        layout_box.box_metrics.y = y
+        
+        # Calculate width
+        if layout_box.box_metrics.content_width == 'auto':
+            # Default to fill container
+            layout_box.box_metrics.content_width = container_width - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+        
+        # Update box dimensions
+        layout_box._update_box_dimensions()
+        
+        # Layout children
+        if layout_box.display == 'block':
+            self._layout_block_children(layout_box, container_width)
+        elif layout_box.display == 'inline':
+            self._layout_inline_children(layout_box, container_width)
+        else:
+            # Default to block layout
+            self._layout_block_children(layout_box, container_width)
+        
+        # Calculate height based on children
+        if layout_box.box_metrics.content_height == 'auto':
+            height = 0
+            for child in layout_box.children:
+                child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height - layout_box.box_metrics.y
+                height = max(height, child_bottom)
+            layout_box.box_metrics.content_height = height
+            layout_box._update_box_dimensions()
+            
+    def _layout_block_children(self, layout_box: LayoutBox, container_width: int) -> None:
+        """
+        Layout block children of a box.
+        
+        Args:
+            layout_box: Parent box
+            container_width: Width of containing box
+        """
+        x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
+        y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
+        
+        available_width = layout_box.box_metrics.content_width
+        
+        prev_element_tag = None
+        
+        for child in layout_box.children:
+            # Layout the child
+            self._layout_box(child, x, y, available_width)
+            
+            # Add additional spacing between elements
+            # Default spacing for all elements
+            extra_spacing = 5  # Base spacing for all elements
+            
+            if child.element and hasattr(child.element, 'tag_name'):
+                current_tag = child.element.tag_name.lower()
+                
+                # Determine if we need extra spacing based on element types
+                if prev_element_tag and current_tag:
+                    # Increased spacing for better readability
+                    if prev_element_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                        extra_spacing = 12  # Increased from 3
+                    elif prev_element_tag == 'p' and current_tag == 'p':
+                        extra_spacing = 8   # Increased from 2
+                    elif prev_element_tag in ['div', 'section', 'article']:
+                        extra_spacing = 10  # Increased from 1
+                    elif prev_element_tag in ['ul', 'ol']:
+                        extra_spacing = 10  # Add spacing after lists
+                    elif prev_element_tag == 'li':
+                        extra_spacing = 4   # Spacing between list items
+                    elif prev_element_tag in ['table', 'form']:
+                        extra_spacing = 12  # Spacing after tables and forms
+                    elif prev_element_tag == 'img':
+                        extra_spacing = 10  # Spacing after images
+                
+                # Add more spacing before headings
+                if current_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and prev_element_tag:
+                    extra_spacing = max(extra_spacing, 15)  # Ensure headings have good spacing before them
+                
+                # Save current element tag for next iteration
+                prev_element_tag = current_tag
+            
+            # Move down for next child, including extra spacing
+            y += child.box_metrics.margin_box_height + extra_spacing
+    
+    def _layout_inline_children(self, layout_box: LayoutBox, container_width: int) -> None:
+        """
+        Layout inline children of a box.
+        
+        Args:
+            layout_box: Parent box
+            container_width: Width of containing box
+        """
+        x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
+        y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
+        
+        available_width = layout_box.box_metrics.content_width
+        line_height = 0
+        current_line_width = 0
+        
+        for child in layout_box.children:
+            # Calculate child width
+            if child.box_metrics.content_width == 'auto':
+                # Default to content-based width for inline elements
+                child.box_metrics.content_width = 50  # Default width
+                child._update_box_dimensions()
+            
+            # Check if this child fits on the current line
+            if current_line_width + child.box_metrics.margin_box_width > available_width:
+                # Move to next line
+                x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
+                y += line_height
+                current_line_width = 0
+                line_height = 0
+            
+            # Layout this child
+            self._layout_box(child, x, y, child.box_metrics.content_width)
+            
+            # Update position for next child
+            x += child.box_metrics.margin_box_width
+            current_line_width += child.box_metrics.margin_box_width
+            line_height = max(line_height, child.box_metrics.margin_box_height)
     
     def create_layout_tree(self, document: Document) -> LayoutBox:
         """
@@ -181,28 +394,46 @@ class LayoutEngine:
         
         return root_box
     
-    def _build_layout_tree(self, element: Element, parent_box: LayoutBox) -> None:
+    def _build_layout_tree(self, element, parent_box=None) -> LayoutBox:
         """
-        Recursively build a layout tree from a DOM tree.
+        Build a layout tree from an element tree.
         
         Args:
-            element: The current DOM element
-            parent_box: The parent layout box
+            element: The root element
+            parent_box: Optional parent layout box
+            
+        Returns:
+            Root of the layout tree
         """
-        # Process each child element
-        for child in element.children:
-            # Skip elements with display:none
-            if self._has_display_none(child):
-                continue
+        # Import LayoutBox if needed
+        from browser_engine.html5_engine.layout.layout import LayoutBox
+        
+        # Create a layout box for this element
+        display_type = 'block'  # Default display type
+        if parent_box:
+            display_type = parent_box.display
             
-            # Create a layout box for the child
-            child_box = self._create_layout_box(child)
-            
-            # Add to parent
-            parent_box.add_child(child_box)
-            
-            # Process the child's children
-            self._build_layout_tree(child, child_box)
+        layout_box = LayoutBox(element, display_type, parent_box)
+        
+        # Recursively add children
+        if hasattr(element, 'child_nodes'):
+            for child in element.child_nodes:
+                # Skip non-element nodes for now (like text, comments, etc.)
+                if hasattr(child, 'node_type') and child.node_type == 1:  # ELEMENT_NODE
+                    child_box = self._build_layout_tree(child, layout_box)
+                    layout_box.add_child(child_box)
+                elif hasattr(child, 'node_type') and child.node_type == 3:  # TEXT_NODE
+                    # Handle text nodes specially
+                    # In a real browser, we would create anonymous boxes for text
+                    # For simplicity, we'll just include the text in the parent's content
+                    if hasattr(element, 'text_content'):
+                        if hasattr(child, 'node_value'):
+                            if not element.text_content:
+                                element.text_content = child.node_value
+                            else:
+                                element.text_content += child.node_value
+                        
+        return layout_box
     
     def _create_layout_box(self, element: Element) -> LayoutBox:
         """
@@ -302,22 +533,81 @@ class LayoutEngine:
             'float': 'none',
         }
         
-        # Add tag-specific defaults
+        # Add tag-specific defaults with increased vertical spacing
         if tag_name == 'body':
             defaults.update({
-                'margin-top': '8px',
-                'margin-right': '8px',
-                'margin-bottom': '8px',
-                'margin-left': '8px',
+                'margin-top': '16px',
+                'margin-right': '16px',
+                'margin-bottom': '16px',
+                'margin-left': '16px',
             })
-        elif tag_name in ('div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+        # Block elements
+        elif tag_name == 'div':
             defaults.update({
-                'margin-top': '1em',
+                'margin-top': '1.2em',
+                'margin-bottom': '1.2em',
+            })
+        elif tag_name == 'p':
+            defaults.update({
+                'margin-top': '1.2em',
+                'margin-bottom': '1.2em',
+            })
+        # Headings with progressively smaller margins as the level increases
+        elif tag_name == 'h1':
+            defaults.update({
+                'margin-top': '1.8em',
                 'margin-bottom': '1em',
             })
+        elif tag_name == 'h2':
+            defaults.update({
+                'margin-top': '1.6em',
+                'margin-bottom': '0.9em',
+            })
+        elif tag_name == 'h3':
+            defaults.update({
+                'margin-top': '1.4em',
+                'margin-bottom': '0.8em',
+            })
+        elif tag_name in ('h4', 'h5', 'h6'):
+            defaults.update({
+                'margin-top': '1.2em',
+                'margin-bottom': '0.7em',
+            })
+        # Lists
+        elif tag_name in ('ul', 'ol'):
+            defaults.update({
+                'margin-top': '1.2em',
+                'margin-bottom': '1.2em',
+                'padding-left': '40px',  # Add left padding for list indentation
+            })
+        elif tag_name == 'li':
+            defaults.update({
+                'margin-top': '0.5em',
+                'margin-bottom': '0.5em',
+            })
+        # Table elements
+        elif tag_name == 'table':
+            defaults.update({
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
+            })
+        # Form elements
+        elif tag_name == 'form':
+            defaults.update({
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
+            })
+        # Inline elements
         elif tag_name == 'span':
             defaults.update({
                 'display': 'inline',
+            })
+        # Image elements
+        elif tag_name == 'img':
+            defaults.update({
+                'margin-top': '1em',
+                'margin-bottom': '1em',
+                'display': 'inline-block',
             })
         
         return defaults
@@ -347,23 +637,53 @@ class LayoutEngine:
         return style_dict
     
     def _has_display_none(self, element: Element) -> bool:
+        """Check if an element has display: none in its computed style."""
+        if not element:
+            return False
+            
+        if hasattr(element, 'computed_style'):
+            return element.computed_style.get('display', '') == 'none'
+        
+        style = self._get_computed_style(element)
+        return style.get('display', '') == 'none'
+        
+    def _get_display_type(self, element: Element) -> DisplayType:
         """
-        Check if an element has display:none.
+        Get the display type for an element based on its computed style.
         
         Args:
-            element: The DOM element
+            element: The element to get the display type for
             
         Returns:
-            True if the element has display:none, False otherwise
+            The display type enum value
         """
-        style_attr = element.get_attribute('style')
-        if style_attr:
-            inline_styles = self._parse_inline_styles(style_attr)
-            if inline_styles.get('display', '').lower() == 'none':
-                return True
+        if not element:
+            return DisplayType.BLOCK
+            
+        # Get computed style
+        style = self._get_computed_style(element)
+        display_value = style.get('display', 'block').lower()
         
-        # In a full implementation, would check the computed style
-        return False
+        # Map to DisplayType enum
+        if display_value == 'inline':
+            return DisplayType.INLINE
+        elif display_value == 'inline-block':
+            return DisplayType.INLINE_BLOCK
+        elif display_value == 'flex':
+            return DisplayType.FLEX
+        elif display_value == 'grid':
+            return DisplayType.GRID
+        elif display_value == 'none':
+            return DisplayType.NONE
+        elif display_value == 'table':
+            return DisplayType.TABLE
+        elif display_value == 'table-row':
+            return DisplayType.TABLE_ROW
+        elif display_value == 'table-cell':
+            return DisplayType.TABLE_CELL
+        else:
+            # Default to block display
+            return DisplayType.BLOCK
     
     def _apply_box_model(self, box: LayoutBox, computed_style: Dict[str, str]) -> None:
         """
@@ -445,173 +765,6 @@ class LayoutEngine:
             
         except ValueError:
             return 0
-    
-    def layout(self, layout_box: LayoutBox, viewport_width: int, viewport_height: int) -> None:
-        """
-        Perform layout calculations on a layout box.
-        
-        Args:
-            layout_box: The layout box to calculate layout for
-            viewport_width: The width of the viewport
-            viewport_height: The height of the viewport
-        """
-        # First calculate layout for this box
-        self._calculate_box_dimensions(layout_box, viewport_width, viewport_height)
-        
-        # Handle different layout modes based on display property
-        display = layout_box.computed_style.get('display', 'block')
-        
-        if display == 'grid':
-            self._handle_grid_layout(layout_box)
-        elif display == 'flex':
-            self._handle_flex_layout(layout_box)
-        else:
-            # Default to standard block/inline layout
-            self._layout_children(layout_box)
-    
-    def _handle_grid_layout(self, layout_box):
-        """
-        Handle grid layout for a container.
-        
-        Args:
-            layout_box: The grid container layout box
-        """
-        if not layout_box.children:
-            return
-            
-        # Initialize grid layout engine
-        grid_engine = GridLayoutEngine(
-            layout_box.box_metrics.content_box_width,
-            layout_box.box_metrics.content_box_height
-        )
-        
-        # Parse grid container properties
-        grid_engine.parse_grid_container(layout_box.element, layout_box.computed_style)
-        
-        # First layout all children to determine their intrinsic sizes
-        for child_box in layout_box.children:
-            self._calculate_box_dimensions(child_box, layout_box.box_metrics.content_box_width, 
-                                          layout_box.box_metrics.content_box_height)
-            
-            # Add the child as a grid item
-            grid_engine.add_grid_item(child_box, child_box.computed_style)
-            
-        # Calculate grid layout
-        grid_layout = grid_engine.calculate_layout()
-        
-        # Apply calculated positions and dimensions to children
-        for child_box in layout_box.children:
-            if child_box in grid_layout:
-                position = grid_layout[child_box]
-                
-                # Update child box metrics
-                child_box.box_metrics.x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + position['x']
-                child_box.box_metrics.y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + position['y']
-                child_box.box_metrics.width = position['width']
-                child_box.box_metrics.height = position['height']
-                
-                # Recursively layout grandchildren
-                self.layout(child_box, position['width'], position['height'])
-    
-    def _handle_flex_layout(self, layout_box):
-        """
-        Handle flexbox layout for a container.
-        
-        Args:
-            layout_box: The flex container layout box
-        """
-        if not layout_box.children:
-            return
-            
-        # Initialize flexbox layout engine
-        flex_engine = FlexboxLayoutEngine(
-            layout_box.box_metrics.content_box_width,
-            layout_box.box_metrics.content_box_height
-        )
-        
-        # Parse flex container properties
-        flex_engine.parse_flex_container(layout_box.element, layout_box.computed_style)
-        
-        # First layout all children to determine their intrinsic sizes
-        for child_box in layout_box.children:
-            self._calculate_box_dimensions(child_box, layout_box.box_metrics.content_box_width, 
-                                          layout_box.box_metrics.content_box_height)
-            
-            # Add the child as a flex item
-            flex_engine.add_flex_item(
-                child_box, 
-                child_box.computed_style,
-                child_box.box_metrics.content_box_width,
-                child_box.box_metrics.content_box_height
-            )
-            
-        # Calculate flexbox layout
-        flex_layout = flex_engine.calculate_layout()
-        
-        # Apply calculated positions and dimensions to children
-        for child_box in layout_box.children:
-            if child_box in flex_layout:
-                position = flex_layout[child_box]
-                
-                # Update child box metrics
-                child_box.box_metrics.x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + position['x']
-                child_box.box_metrics.y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + position['y']
-                child_box.box_metrics.width = position['width']
-                child_box.box_metrics.height = position['height']
-                
-                # Recursively layout grandchildren
-                self.layout(child_box, position['width'], position['height'])
-    
-    def _layout_children(self, layout_box: LayoutBox) -> None:
-        """
-        Perform layout for a box's children.
-        
-        Args:
-            layout_box: The layout box to calculate layout for
-        """
-        # Recursive layout algorithm
-        self._calculate_layout(layout_box, layout_box.box_metrics.width, layout_box.box_metrics.height, 0, 0)
-    
-    def _calculate_layout(self, box: LayoutBox, container_width: int, container_height: int, 
-                          start_x: int, start_y: int) -> Tuple[int, int]:
-        """
-        Calculate layout for a box and its children.
-        
-        Args:
-            box: The layout box to calculate
-            container_width: Width of the container
-            container_height: Height of the container
-            start_x: Starting X position
-            start_y: Starting Y position
-            
-        Returns:
-            Tuple of (width, height) of the laid out box
-        """
-        # Set initial position
-        box.box_metrics.x = start_x
-        box.box_metrics.y = start_y
-        
-        # Calculate width if not explicitly set
-        if box.box_metrics.width is None:
-            if box.display == DisplayType.BLOCK:
-                # Block elements expand to fill container width
-                content_width = container_width - box.box_metrics.margin_left - box.box_metrics.margin_right
-                box.box_metrics.width = content_width - box.box_metrics.padding_left - box.box_metrics.padding_right - box.box_metrics.border_left_width - box.box_metrics.border_right_width
-            else:
-                # Inline elements size to content
-                # For simplicity, we'll set a default width
-                box.box_metrics.width = 100
-        
-        # Layout based on display type
-        if box.display == DisplayType.BLOCK:
-            return self._layout_block(box, container_width, container_height)
-        elif box.display == DisplayType.INLINE:
-            return self._layout_inline(box, container_width, container_height)
-        elif box.display == DisplayType.FLEX:
-            return self._layout_flex(box, container_width, container_height)
-        else:
-            # Default to block layout
-            return self._layout_block(box, container_width, container_height)
     
     def _layout_block(self, box: LayoutBox, container_width: int, container_height: int) -> Tuple[int, int]:
         """
@@ -790,25 +943,159 @@ class LayoutEngine:
         
         return (box.box_metrics.border_box_width, box.box_metrics.border_box_height)
     
-    def create_layout(self, document: Document, viewport_width: int, viewport_height: int) -> LayoutBox:
+    def _calculate_layout(self, box: LayoutBox, container_width: int, container_height: int, 
+                          start_x: int, start_y: int) -> Tuple[int, int]:
         """
-        Create a layout for a document with the given viewport dimensions.
+        Calculate layout for a box and its children.
         
         Args:
-            document: The document to create a layout for
-            viewport_width: The width of the viewport
-            viewport_height: The height of the viewport
+            box: The layout box to calculate
+            container_width: Width of the container
+            container_height: Height of the container
+            start_x: Starting X position
+            start_y: Starting Y position
             
         Returns:
-            The root layout box with calculated layout
+            Tuple of (width, height) of the laid out box
         """
-        # Create the layout tree
-        root_box = self.create_layout_tree(document)
+        # Set initial position
+        box.box_metrics.x = start_x
+        box.box_metrics.y = start_y
         
-        # Calculate layout
-        self.layout(root_box, viewport_width, viewport_height)
+        # Calculate width if not explicitly set
+        if box.box_metrics.width is None:
+            if box.display == DisplayType.BLOCK:
+                # Block elements expand to fill container width
+                content_width = container_width - box.box_metrics.margin_left - box.box_metrics.margin_right
+                box.box_metrics.width = content_width - box.box_metrics.padding_left - box.box_metrics.padding_right - box.box_metrics.border_left_width - box.box_metrics.border_right_width
+            else:
+                # Inline elements size to content
+                # For simplicity, we'll set a default width
+                box.box_metrics.width = 100
         
-        return root_box
+        # Layout based on display type
+        if box.display == DisplayType.BLOCK:
+            return self._layout_block(box, container_width, container_height)
+        elif box.display == DisplayType.INLINE:
+            return self._layout_inline(box, container_width, container_height)
+        elif box.display == DisplayType.FLEX:
+            return self._layout_flex(box, container_width, container_height)
+        else:
+            # Default to block layout
+            return self._layout_block(box, container_width, container_height)
+    
+    def _calculate_box_dimensions(self, layout_box: LayoutBox, viewport_width: int, viewport_height: int) -> None:
+        """
+        Calculate dimensions for a layout box.
+        
+        Args:
+            layout_box: Layout box to calculate dimensions for
+            viewport_width: Width of the viewport
+            viewport_height: Height of the viewport
+        """
+        # Check if content dimensions are specified in the style
+        styles = layout_box.computed_style
+        
+        # Get width and height from styles
+        width = self._parse_dimension(styles.get('width', 'auto'))
+        height = self._parse_dimension(styles.get('height', 'auto'))
+        
+        # Calculate box model properties
+        margin_top = self._parse_dimension(styles.get('margin-top', '0'))
+        margin_right = self._parse_dimension(styles.get('margin-right', '0'))
+        margin_bottom = self._parse_dimension(styles.get('margin-bottom', '0'))
+        margin_left = self._parse_dimension(styles.get('margin-left', '0'))
+        
+        padding_top = self._parse_dimension(styles.get('padding-top', '0'))
+        padding_right = self._parse_dimension(styles.get('padding-right', '0'))
+        padding_bottom = self._parse_dimension(styles.get('padding-bottom', '0'))
+        padding_left = self._parse_dimension(styles.get('padding-left', '0'))
+        
+        border_top = self._parse_dimension(styles.get('border-top-width', '0'))
+        border_right = self._parse_dimension(styles.get('border-right-width', '0'))
+        border_bottom = self._parse_dimension(styles.get('border-bottom-width', '0'))
+        border_left = self._parse_dimension(styles.get('border-left-width', '0'))
+        
+        # Update the box metrics
+        layout_box.box_metrics.width = width
+        layout_box.box_metrics.height = height
+        
+        layout_box.box_metrics.margin_top = margin_top
+        layout_box.box_metrics.margin_right = margin_right
+        layout_box.box_metrics.margin_bottom = margin_bottom
+        layout_box.box_metrics.margin_left = margin_left
+        
+        layout_box.box_metrics.padding_top = padding_top
+        layout_box.box_metrics.padding_right = padding_right
+        layout_box.box_metrics.padding_bottom = padding_bottom
+        layout_box.box_metrics.padding_left = padding_left
+        
+        layout_box.box_metrics.border_top_width = border_top
+        layout_box.box_metrics.border_right_width = border_right
+        layout_box.box_metrics.border_bottom_width = border_bottom
+        layout_box.box_metrics.border_left_width = border_left
+        
+        # Update content dimensions
+        if width != 'auto':
+            layout_box.box_metrics.content_width = width
+        else:
+            # For block elements, default to full width of container minus margins
+            if layout_box.display == 'block':
+                layout_box.box_metrics.content_width = viewport_width - margin_left - margin_right - padding_left - padding_right - border_left - border_right
+            else:
+                # For inline elements, content determines width (will be calculated later)
+                layout_box.box_metrics.content_width = 'auto'
+        
+        if height != 'auto':
+            layout_box.box_metrics.content_height = height
+        else:
+            # Height will be calculated based on content
+            layout_box.box_metrics.content_height = 'auto'
+
+    def create_layout_for_element(self, element, viewport_width=800, viewport_height=600):
+        """
+        Create a layout tree for a specific element.
+        
+        Args:
+            element: The element to create layout for
+            viewport_width: Width of the viewport
+            viewport_height: Height of the viewport
+            
+        Returns:
+            The root layout box for the element
+        """
+        # Create a layout box for the element
+        layout_box = LayoutBox(element)
+        
+        # Set initial dimensions
+        layout_box.box_metrics.width = viewport_width
+        
+        # If this is the body element, treat it as a block
+        if hasattr(element, 'tag_name') and element.tag_name.lower() == 'body':
+            layout_box.box_type = BoxType.BLOCK
+        else:
+            # Determine box type based on display property
+            display = self._get_display_type(element)
+            if display == DisplayType.BLOCK:
+                layout_box.box_type = BoxType.BLOCK
+            elif display == DisplayType.INLINE_BLOCK:
+                layout_box.box_type = BoxType.INLINE_BLOCK
+            else:
+                layout_box.box_type = BoxType.INLINE
+        
+        # Set up computed styles
+        layout_box.computed_style = self._get_computed_style(element)
+        
+        # Process children
+        if hasattr(element, 'child_nodes'):
+            for child in element.child_nodes:
+                # Only process element nodes
+                if hasattr(child, 'node_type') and child.node_type == 1:  # Element node
+                    child_box = self.create_layout_for_element(child, viewport_width)
+                    layout_box.children.append(child_box)
+                    child_box.parent = layout_box
+        
+        return layout_box
 
 class GridLayoutEngine:
     """

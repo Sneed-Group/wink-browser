@@ -54,6 +54,9 @@ class HTML5Engine:
         # The renderer will be initialized later when a parent frame is available
         self.renderer = None
         
+        # Add base_url attribute for URL tracking
+        self.base_url = None
+        
         # Event handlers
         self.on_load_handlers = []
         self.on_error_handlers = []
@@ -83,13 +86,16 @@ class HTML5Engine:
         """
         self.logger.info("Loading HTML content")
         
+        # Store the base_url in the engine
+        self.base_url = base_url
+        
         # Create a new document
         self.document = Document()
         
         # Parse HTML into the document
         self.document.parse_html(html_content)
         
-        # Store base URL
+        # Store base URL in document
         self.document.base_url = base_url
         
         # Process stylesheets
@@ -125,6 +131,10 @@ class HTML5Engine:
         self.logger.info("Loading URL: %s", url)
         
         try:
+            # Handle special URLs
+            if url.startswith(('about:', 'data:', 'javascript:', 'blob:', 'file:')):
+                return self._handle_special_url(url)
+                
             # Fetch the URL
             with urllib.request.urlopen(url) as response:
                 html_content = response.read().decode('utf-8')
@@ -137,9 +147,226 @@ class HTML5Engine:
             self._trigger_error(str(e))
             raise
     
+    def _handle_special_url(self, url: str) -> Document:
+        """
+        Handle special URLs like about:blank, data:, javascript:, etc.
+        
+        Args:
+            url: The special URL to handle
+            
+        Returns:
+            The parsed Document object
+        """
+        # Store the URL in the engine
+        self.base_url = url
+        
+        # Handle about: URLs
+        if url.startswith('about:'):
+            scheme, identifier = url.split(':', 1)
+            
+            # Handle about:blank
+            if identifier == "blank" or not identifier:
+                html_content = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>New Page</title>
+                </head>
+                <body>
+                </body>
+                </html>
+                """
+                return self.load_html(html_content, url)
+                
+            # Handle about:version
+            elif identifier == "version":
+                import sys
+                import platform
+                
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Browser Version</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        h1 {{ color: #333; }}
+                        .info {{ margin-bottom: 10px; }}
+                        .label {{ font-weight: bold; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Browser Information</h1>
+                    <div class="info"><span class="label">Version:</span> 0.1.0</div>
+                    <div class="info"><span class="label">Python:</span> {sys.version}</div>
+                    <div class="info"><span class="label">Platform:</span> {platform.platform()}</div>
+                </body>
+                </html>
+                """
+                return self.load_html(html_content, url)
+            
+            # Generic about: handler
+            else:
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>About:{identifier}</title>
+                </head>
+                <body>
+                    <h1>About:{identifier}</h1>
+                    <p>This page is not available.</p>
+                </body>
+                </html>
+                """
+                return self.load_html(html_content, url)
+                
+        # Handle data: URLs
+        elif url.startswith('data:'):
+            import base64
+            import urllib.parse
+            
+            # Parse the data URL
+            try:
+                # Remove the "data:" prefix
+                data_part = url[5:]
+                
+                # Split by comma to separate mime type and data
+                if ',' not in data_part:
+                    raise ValueError("Invalid data URL format")
+                    
+                mime_part, data = data_part.split(',', 1)
+                
+                # Determine content type and encoding
+                content_type = "text/plain"
+                is_base64 = False
+                
+                if mime_part:
+                    parts = mime_part.split(';')
+                    if parts[0]:
+                        content_type = parts[0]
+                    is_base64 = 'base64' in mime_part
+                
+                # Decode the data
+                if is_base64:
+                    content = base64.b64decode(data).decode('utf-8')
+                else:
+                    content = urllib.parse.unquote(data)
+                
+                # If it's HTML content, load it directly
+                if content_type == "text/html":
+                    return self.load_html(content, url)
+                else:
+                    # For other types, wrap in HTML
+                    html_content = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Data URL</title>
+                    </head>
+                    <body>
+                        <pre>{content}</pre>
+                    </body>
+                    </html>
+                    """
+                    return self.load_html(html_content, url)
+                    
+            except Exception as e:
+                self.logger.error(f"Error parsing data URL: {e}")
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Error</title>
+                </head>
+                <body>
+                    <h1>Error parsing data URL</h1>
+                    <p>{str(e)}</p>
+                </body>
+                </html>
+                """
+                return self.load_html(html_content, "about:error")
+        
+        # Handle javascript: URLs
+        elif url.startswith('javascript:'):
+            html_content = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>JavaScript URL</title>
+            </head>
+            <body>
+                <p>JavaScript URLs are not supported in this browser.</p>
+            </body>
+            </html>
+            """
+            return self.load_html(html_content, url)
+            
+        # Handle blob: URLs
+        elif url.startswith('blob:'):
+            html_content = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Blob URL</title>
+            </head>
+            <body>
+                <p>Blob URLs are not supported in this browser.</p>
+            </body>
+            </html>
+            """
+            return self.load_html(html_content, url)
+            
+        # Handle file: URLs
+        elif url.startswith('file:'):
+            try:
+                # Extract the file path
+                if url.startswith('file://'):
+                    file_path = url[7:]
+                else:
+                    file_path = url[5:]
+                
+                # On Windows, handle drive letters correctly
+                if os.name == 'nt' and file_path.startswith('/'):
+                    file_path = file_path[1:]
+                
+                # Load the file
+                return self.load_file(file_path)
+                
+            except Exception as e:
+                self.logger.error(f"Error loading file URL: {e}")
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Error</title>
+                </head>
+                <body>
+                    <h1>Error loading file</h1>
+                    <p>{str(e)}</p>
+                </body>
+                </html>
+                """
+                return self.load_html(html_content, "about:error")
+                
+        # Default handler for unknown special URLs
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Unsupported URL</title>
+        </head>
+        <body>
+            <h1>Unsupported URL</h1>
+            <p>The URL '{url}' is not supported.</p>
+        </body>
+        </html>
+        """
+        return self.load_html(html_content, "about:error")
+    
     def load_file(self, file_path: str) -> Document:
         """
-        Load HTML from a local file.
+        Load HTML from a file.
         
         Args:
             file_path: Path to the HTML file
@@ -150,15 +377,19 @@ class HTML5Engine:
         self.logger.info("Loading file: %s", file_path)
         
         try:
+            # Ensure the file exists
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+                
             # Read the file
             with open(file_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
-            
-            # Convert file path to URL format for base URL
-            base_url = f"file://{os.path.abspath(file_path)}"
+                
+            # Use the file:// URL format
+            url = f"file://{os.path.abspath(file_path)}"
             
             # Load the HTML content
-            return self.load_html(html_content, base_url)
+            return self.load_html(html_content, url)
             
         except Exception as e:
             self.logger.error("Error loading file: %s", str(e))
@@ -230,40 +461,148 @@ class HTML5Engine:
         try:
             style_elements = self._find_elements_by_tag_name(self.document, "style")
             for style_element in style_elements:
-                if hasattr(style_element, 'text_content') and style_element.text_content:
-                    stylesheet = self.css_parser.parse(style_element.text_content, base_url)
-                    self._apply_stylesheet(stylesheet)
-        except Exception as e:
-            self.logger.error(f"Error processing style elements: {e}")
+                try:
+                    # Get CSS content - try different possible attributes
+                    css_content = None
+                    
+                    # Try each possible way to get the content
+                    if hasattr(style_element, 'style_content'):
+                        css_content = style_element.style_content
+                    elif hasattr(style_element, 'text_content'):
+                        css_content = style_element.text_content
+                    elif hasattr(style_element, 'textContent'):
+                        css_content = style_element.textContent
+                    # Try to get content from child text nodes as last resort
+                    elif hasattr(style_element, 'child_nodes'):
+                        for child in style_element.child_nodes:
+                            if hasattr(child, 'node_type') and child.node_type == 3:  # TEXT_NODE
+                                if hasattr(child, 'data'):
+                                    css_content = child.data
+                                    break
+                    
+                    # Skip if no valid content found
+                    if not css_content or not isinstance(css_content, str):
+                        continue
+                        
+                    # Use simple CSS parsing to avoid type attribute errors
+                    # This avoids the 'str' object has no attribute 'type' error
+                    css_rules = {}
+                    try:
+                        # Use regex to extract rules - avoids cssutils potential issues
+                        import re
+                        rule_pattern = r'([^{]+){([^}]*)}'
+                        matches = re.findall(rule_pattern, css_content)
+                        
+                        for selector, declarations in matches:
+                            selector = selector.strip()
+                            if not selector:
+                                continue
+                                
+                            # Parse declarations
+                            props = {}
+                            for decl in declarations.split(';'):
+                                if not decl.strip() or ':' not in decl:
+                                    continue
+                                    
+                                prop, val = decl.split(':', 1)
+                                prop = prop.strip()
+                                val = val.strip()
+                                
+                                if prop and val:
+                                    props[prop] = val
+                            
+                            if props:
+                                css_rules[selector] = props
+                    except Exception as parse_err:
+                        self.logger.debug(f"Regex CSS parsing error: {parse_err}, trying cssutils")
+                        # Fall back to cssutils parsing if regex fails
+                        try:
+                            sheet = self.css_parser._safe_parse_css(css_content)
+                            if sheet:
+                                # Extract rules safely, handling potential string objects
+                                for rule in sheet:
+                                    if hasattr(rule, 'type') and hasattr(rule, 'selectorText') and hasattr(rule, 'style'):
+                                        selector = rule.selectorText
+                                        props = {}
+                                        for prop in rule.style:
+                                            if hasattr(prop, 'name') and hasattr(prop, 'value'):
+                                                props[prop.name] = prop.value
+                                        if props:
+                                            css_rules[selector] = props
+                        except Exception as cssutils_err:
+                            self.logger.debug(f"cssutils parsing error: {cssutils_err}")
+                    
+                    # Apply the parsed rules
+                    if css_rules:
+                        # Add to stylesheets list
+                        self.css_parser.stylesheets.append(css_rules)
+                        
+                        # Update the combined style_rules
+                        for selector, props in css_rules.items():
+                            if selector in self.css_parser.style_rules:
+                                self.css_parser.style_rules[selector].update(props)
+                            else:
+                                self.css_parser.style_rules[selector] = props.copy()
+                except Exception as element_err:
+                    # Catch any exceptions within the style element processing loop
+                    self.logger.debug(f"Error processing individual style element: {element_err}")
+            
+            self.logger.info("Style elements processed successfully")
+        except Exception as style_err:
+            self.logger.error(f"Error processing style elements: {style_err}")
         
-        # Process <link rel="stylesheet"> elements
+        # Process <link> elements for external stylesheets
         try:
             link_elements = self._find_stylesheet_links(self.document)
+            processed_urls = set()  # Track processed URLs to avoid duplicates
+            
             for link_element in link_elements:
-                href = link_element.get_attribute("href")
-                if href and base_url:
-                    # Resolve URL
-                    if not href.startswith(('http://', 'https://', 'file://')):
-                        if base_url.endswith('/'):
-                            full_url = f"{base_url}{href}"
-                        else:
-                            full_url = f"{base_url}/{href}"
-                    else:
-                        full_url = href
+                try:
+                    href = link_element.get_attribute("href")
+                    if not href or href in processed_urls:
+                        continue
                         
+                    processed_urls.add(href)
+                    
+                    # Resolve relative URL if base_url is provided
+                    if base_url and not href.startswith(('http://', 'https://', '//')):
+                        from urllib.parse import urljoin
+                        href = urljoin(base_url, href)
+                    
+                    # Fetch the stylesheet
                     try:
-                        # Fetch the stylesheet
-                        with urllib.request.urlopen(full_url) as response:
-                            css_content = response.read().decode('utf-8')
-                            
-                        # Parse and apply the stylesheet
-                        stylesheet = self.css_parser.parse(css_content, base_url)
-                        self._apply_stylesheet(stylesheet)
+                        # Check if we already have this resource
+                        if hasattr(self, 'resources') and href in self.resources:
+                            css_content = self.resources[href].decode('utf-8', errors='replace')
+                        else:
+                            # Fetch the stylesheet
+                            with urllib.request.urlopen(href) as response:
+                                css_content = response.read().decode('utf-8', errors='replace')
+                                
+                                # Store in resources for future use
+                                if hasattr(self, 'resources'):
+                                    self.resources[href] = css_content.encode('utf-8')
                         
+                        # Parse and apply the stylesheet (using the same safe parsing)
+                        if css_content:
+                            site_rules = self.css_parser.parse(css_content, href)
+                            
+                            # Add to stylesheets list
+                            if site_rules:
+                                self.css_parser.stylesheets.append(site_rules)
+                                
+                                # Update the combined style_rules
+                                for selector, props in site_rules.items():
+                                    if selector in self.css_parser.style_rules:
+                                        self.css_parser.style_rules[selector].update(props)
+                                    else:
+                                        self.css_parser.style_rules[selector] = props.copy()
                     except Exception as e:
-                        self.logger.error(f"Error loading stylesheet {full_url}: {e}")
+                        self.logger.error(f"Error fetching or parsing external stylesheet {href}: {e}")
+                except Exception as e:
+                    self.logger.error(f"Error processing individual link element: {e}")
         except Exception as e:
-            self.logger.error(f"Error processing stylesheet links: {e}")
+            self.logger.error(f"Error processing link elements: {e}")
     
     def _find_elements_with_attribute(self, node, attribute_name):
         """Find elements with a specific attribute."""
@@ -367,12 +706,12 @@ class HTML5Engine:
         
         # Calculate layout using the layout engine
         try:
-            self.layout = self.layout_engine.create_layout(
+            self.layout_tree = self.layout_engine.create_layout(
                 self.document, 
                 viewport_width, 
                 viewport_height
             )
-            self.logger.debug(f"Layout created successfully: {self.layout}")
+            self.logger.debug(f"Layout created successfully: {self.layout_tree}")
         except Exception as e:
             self.logger.error(f"Error calculating layout: {str(e)}")
             self._trigger_error(f"Layout calculation error: {str(e)}")

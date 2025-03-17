@@ -35,6 +35,7 @@ class Selector:
         """Initialize a CSS selector."""
         self.parts: List[SelectorPart] = []
         self.specificity: Tuple[int, int, int] = (0, 0, 0)  # (id, class, tag)
+        self.tree = None  # Add this for backward compatibility
     
     def add_part(self, part: SelectorPart) -> None:
         """

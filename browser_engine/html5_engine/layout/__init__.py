@@ -1,4 +1,4 @@
 from .box_metrics import BoxMetrics
-from .layout import LayoutBox
+from .layout import LayoutBox, LayoutEngine
 
-__all__ = ['BoxMetrics', 'LayoutBox'] 
+__all__ = ['BoxMetrics', 'LayoutBox', 'LayoutEngine'] 

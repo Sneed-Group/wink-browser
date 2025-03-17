@@ -337,6 +337,13 @@ class BrowserWindow:
         Args:
             url: URL to navigate to
         """
+        # Check if URL is None
+        if url is None:
+            error_message = "Cannot navigate to None URL"
+            logger.error(error_message)
+            self.status_label.config(text=f"Error: {error_message}")
+            return
+            
         # Normalize and validate URL
         url_obj = URL(url)
         normalized_url = url_obj.normalized
@@ -391,20 +398,62 @@ class BrowserWindow:
             url: URL to load
         """
         try:
+            # Check if URL is None
+            if url is None:
+                error_message = "Cannot load None URL"
+                logger.error(error_message)
+                self.root.after(0, lambda msg=error_message: self._on_page_error(msg))
+                return
+            
             # Apply ad blocker if enabled
             url = self.ad_blocker.process_url(url) if self.ad_blocker else url
             
-            # Use the HTML5 engine to load the URL
-            self.html5_engine.load_url(url)
+            # Check if it's a special URL (about:, data:, etc.)
+            url_obj = URL(url)
             
+            # Debug: Print URL being loaded
+            logger.debug(f"Loading URL in thread: {url}")
+            
+            # Use the HTML5 engine to load the URL
+            success = self.html5_engine.load_url(url)
+            
+            # Debug: Print result of load_url
+            logger.debug(f"URL load success: {success}")
+            
+            # Debug: Check document state
+            if self.html5_engine.document:
+                logger.debug(f"Document loaded: {self.html5_engine.document is not None}")
+                logger.debug(f"Document has document_element: {hasattr(self.html5_engine.document, 'document_element') and self.html5_engine.document.document_element is not None}")
+                
+                if hasattr(self.html5_engine.document, 'document_element') and self.html5_engine.document.document_element is not None:
+                    logger.debug(f"Document element tag: {self.html5_engine.document.document_element.tag_name}")
+                    
+                    # Check for head and body
+                    head = self.html5_engine.document.querySelector("head")
+                    body = self.html5_engine.document.querySelector("body")
+                    logger.debug(f"Document has head: {head is not None}")
+                    logger.debug(f"Document has body: {body is not None}")
+                    
+                    # Check for title
+                    title = self.html5_engine.document.querySelector("title")
+                    logger.debug(f"Document has title: {title is not None}")
+                    if title:
+                        logger.debug(f"Title text: {title.textContent}")
+            
+            if not success:
+                error_message = f"Failed to load URL: {url}"
+                logger.error(error_message)
+                self.root.after(0, lambda msg=error_message: self._on_page_error(msg))
+                return
+                
             # Update progress
             self.root.after(0, lambda: self.progress_var.set(100))
             
             # Update renderer
             self.root.after(0, lambda: self._update_renderer())
             
-            # Cache content if not in private mode
-            if not self.private_mode:
+            # Cache content if not in private mode and not a special URL
+            if not self.private_mode and not url_obj.is_special:
                 self.content_cache[url] = {
                     'document': self.html5_engine.document,
                     'layout': self.html5_engine.layout_engine
@@ -435,7 +484,39 @@ class BrowserWindow:
     def _update_renderer(self) -> None:
         """Update the renderer with the current document."""
         if self.html5_engine.document:
-            self.renderer.render(self.html5_engine.document)
+            # Safely get base_url, defaulting to an empty string if None
+            base_url = self.html5_engine.base_url or ""
+            logger.debug(f"Updating renderer with document from URL: {base_url}")
+            
+            # Make sure the renderer has the correct URL
+            if hasattr(self.html5_engine.renderer, 'current_url'):
+                self.html5_engine.renderer.current_url = base_url
+                
+            # Make sure we reset any about:blank state that might be interfering
+            if base_url != "about:blank" and hasattr(self.html5_engine.renderer, 'document'):
+                self.html5_engine.renderer.document = self.html5_engine.document
+            
+            # Use the new direct elements rendering approach
+            try:
+                # Get head and body elements directly
+                head = self.html5_engine.document.querySelector("head")
+                body = self.html5_engine.document.querySelector("body")
+                
+                logger.debug(f"Using direct elements rendering approach")
+                logger.debug(f"Found head element: {head is not None}")
+                logger.debug(f"Found body element: {body is not None}")
+                
+                if body:
+                    # Use the direct rendering approach
+                    self.html5_engine.renderer.render_elements(head, body, base_url)
+                else:
+                    # Fall back to the old approach if body not found
+                    logger.warning("Could not find body element, falling back to document rendering")
+                    self.html5_engine.renderer.render(self.html5_engine.document)
+            except Exception as e:
+                logger.error(f"Error using direct elements rendering: {e}")
+                # Fall back to normal rendering if direct approach fails
+                self.html5_engine.renderer.render(self.html5_engine.document)
     
     def _update_navigation_state(self) -> None:
         """Update navigation buttons based on history state."""

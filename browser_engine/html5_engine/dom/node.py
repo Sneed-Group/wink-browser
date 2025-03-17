@@ -373,4 +373,38 @@ class Node:
                     if self.owner_document:
                         self.owner_document.handle_error(f"Event listener error: {e}")
         
-        return not event.default_prevented 
+        return not event.default_prevented
+
+    @property
+    def textContent(self) -> str:
+        """
+        Get the text content of this node and all its descendants.
+        
+        Returns:
+            The concatenated text content of this node and its descendants
+        """
+        # Initialize with empty string
+        result = ""
+        
+        # For text nodes, return the node value
+        if self.node_type == NodeType.TEXT_NODE:
+            return self.node_value or ""
+            
+        # For other nodes, recursively get text from children
+        for child in self.child_nodes:
+            # Get child's text content
+            if hasattr(child, 'textContent'):
+                child_text = child.textContent
+                # Ensure child_text is a string
+                if child_text is not None:
+                    if isinstance(child_text, str):
+                        result += child_text
+                    else:
+                        # Try to convert to string if it's not already a string
+                        try:
+                            result += str(child_text)
+                        except Exception:
+                            # If conversion fails, just skip this child
+                            pass
+                
+        return result 

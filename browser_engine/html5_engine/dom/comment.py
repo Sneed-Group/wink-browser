@@ -15,14 +15,18 @@ class Comment(Node):
     
     def __init__(self, data: str, owner_document: Optional['Document'] = None):
         """
-        Initialize a new Comment node.
+        Initialize a comment node.
         
         Args:
-            data: The comment content
+            data: The comment text
             owner_document: The document that owns this node
         """
         super().__init__(NodeType.COMMENT_NODE, owner_document)
         
+        # Ensure data is not None
+        if data is None:
+            data = ""
+            
         self.node_name = "#comment"
         self.node_value = data
         self.data = data  # Alias for node_value

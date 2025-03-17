@@ -34,15 +34,24 @@ class URL:
         Args:
             url: URL string to parse
         """
+        # Ensure url is a string and not None
+        if url is None:
+            logger.warning("URL was None, using 'about:blank' as fallback")
+            url = "about:blank"
+        elif not isinstance(url, str):
+            logger.warning(f"URL was not a string ({type(url)}), converting to string")
+            url = str(url)
+        
         if not url:
             url = "about:blank"
         
         # Check for known special schemes
-        if any(url.startswith(f"{scheme}:") for scheme in self.SPECIAL_SCHEMES):
-            self._url = url
-            self._parsed = urllib.parse.urlparse(url)
-            logger.debug(f"Special URL parsed: {url}")
-            return
+        for scheme in self.SPECIAL_SCHEMES:
+            if url.startswith(f"{scheme}:"):
+                self._url = url
+                self._parsed = urllib.parse.urlparse(url)
+                logger.debug(f"Special URL parsed: {url}")
+                return
             
         # Ensure URL has scheme - default to https:// for security
         if "://" not in url:
@@ -144,7 +153,8 @@ class URL:
     @property
     def normalized(self) -> str:
         """Return a normalized string representation of the URL."""
-        if self.is_special and self.scheme != 'file':
+        # Special URLs should be returned as-is
+        if self.is_special:
             return self._url
         
         # Create a normalized URL string

@@ -15,7 +15,7 @@ class Text(Node):
     
     def __init__(self, data: str, owner_document: Optional['Document'] = None):
         """
-        Initialize a new Text node.
+        Initialize a text node.
         
         Args:
             data: The text content
@@ -23,6 +23,10 @@ class Text(Node):
         """
         super().__init__(NodeType.TEXT_NODE, owner_document)
         
+        # Ensure data is not None
+        if data is None:
+            data = ""
+            
         self.node_name = "#text"
         self.node_value = data
         self.data = data  # Alias for node_value

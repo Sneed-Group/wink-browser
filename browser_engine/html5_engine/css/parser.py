@@ -37,6 +37,60 @@ class CSSParser:
     
     def __init__(self):
         """Initialize the CSS parser."""
+        self.stylesheets = []  # List of all parsed stylesheets
+        self.default_style_rules = {}  # Dictionary of default style rules
+        self.style_rules = {}  # Dictionary of style rules keyed by selector
+        self.important_rules = {}  # Dictionary of !important rules with highest precedence
+        
+        # Define the CSS properties we support
+        self.supported_properties = [
+            # Layout properties
+            'display', 'position', 'top', 'right', 'bottom', 'left',
+            'float', 'clear', 'z-index', 'overflow', 'visibility',
+            
+            # Box model properties
+            'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+            'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+            'box-sizing',
+            
+            # Border properties
+            'border', 'border-width', 'border-style', 'border-color',
+            'border-top', 'border-right', 'border-bottom', 'border-left',
+            'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+            'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+            'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+            'border-radius', 'border-top-left-radius', 'border-top-right-radius',
+            'border-bottom-right-radius', 'border-bottom-left-radius',
+            
+            # Text properties
+            'color', 'font', 'font-family', 'font-size', 'font-weight', 'font-style',
+            'text-align', 'text-decoration', 'text-transform', 'line-height',
+            'letter-spacing', 'word-spacing', 'white-space', 'direction',
+            
+            # Background properties
+            'background', 'background-color', 'background-image', 'background-repeat',
+            'background-position', 'background-size', 'background-attachment',
+            
+            # Table properties
+            'border-collapse', 'border-spacing', 'caption-side', 'empty-cells', 'table-layout',
+            
+            # Flexbox properties
+            'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'justify-content',
+            'align-items', 'align-content', 'align-self', 'flex-grow', 'flex-shrink', 'flex-basis',
+            'order',
+            
+            # Grid properties
+            'grid', 'grid-template', 'grid-template-columns', 'grid-template-rows',
+            'grid-template-areas', 'grid-area', 'grid-row', 'grid-column',
+            
+            # Animation and transition properties
+            'transition', 'transform', 'animation',
+            
+            # Color and opacity
+            'opacity', 'fill', 'stroke'
+        ]
+        
         # CSS parsing settings
         cssutils.ser.prefs.keepComments = True
         cssutils.ser.prefs.resolveVariables = True
@@ -88,39 +142,402 @@ class CSSParser:
         
         logger.debug("CSS Parser initialized with full CSS3 support")
     
-    def parse(self, css_content: str, base_url: Optional[str] = None) -> css.CSSStyleSheet:
+    def reset(self):
+        """Reset the parser state but keep default styles."""
+        self.stylesheets = []  # Clear list of stylesheets
+        self.style_rules = {}  # Reset site-specific style rules
+        self.important_rules = {}  # Reset important rules
+        logger.debug("CSS Parser reset")
+    
+    def add_default_styles(self):
+        """
+        Add default browser styles to the parser.
+        These styles will apply to all documents unless overridden by document styles.
+        """
+        try:
+            # Clear existing default styles
+            self.default_style_rules = {}
+            
+            # Define default styles for various HTML elements
+            default_styles = """
+            /* Default styles for common HTML elements */
+            body {
+                margin: 8px;
+                line-height: 1.2;
+                font-family: sans-serif;
+                font-size: 16px;
+                color: #000;
+            }
+            
+            div, span, p {
+                display: block;
+                margin: 0;
+                padding: 0;
+            }
+            
+            span {
+                display: inline;
+            }
+            
+            h1, h2, h3, h4, h5, h6 {
+                display: block;
+                font-weight: bold;
+                margin-top: 0.67em;
+                margin-bottom: 0.67em;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            h2 {
+                font-size: 1.5em;
+            }
+            
+            h3 {
+                font-size: 1.17em;
+            }
+            
+            h4 {
+                font-size: 1em;
+            }
+            
+            h5 {
+                font-size: 0.83em;
+            }
+            
+            h6 {
+                font-size: 0.67em;
+            }
+            
+            a:link {
+                color: blue;
+                text-decoration: underline;
+                cursor: pointer;
+            }
+            
+            a:visited {
+                color: purple;
+                text-decoration: underline;
+            }
+            
+            a:hover {
+                text-decoration: underline;
+            }
+            
+            a:active {
+                color: red;
+            }
+            
+            img, video, canvas, object {
+                display: inline-block;
+                border: none;
+            }
+            
+            li {
+                display: list-item;
+                margin-left: 40px;
+            }
+            
+            ul {
+                display: block;
+                list-style-type: disc;
+                margin-top: 1em;
+                margin-bottom: 1em;
+                padding-left: 40px;
+            }
+            
+            ol {
+                display: block;
+                list-style-type: decimal;
+                margin-top: 1em;
+                margin-bottom: 1em;
+                padding-left: 40px;
+            }
+            
+            table {
+                display: table;
+                border-collapse: separate;
+                border-spacing: 2px;
+                border-color: gray;
+                box-sizing: border-box;
+            }
+            
+            tr {
+                display: table-row;
+                vertical-align: inherit;
+                border-color: inherit;
+            }
+            
+            td, th {
+                display: table-cell;
+                vertical-align: inherit;
+                border: 1px solid #ddd;
+                padding: 2px;
+            }
+            
+            th {
+                font-weight: bold;
+                text-align: center;
+            }
+            
+            input, button, textarea, select {
+                display: inline-block;
+                font-family: inherit;
+                font-size: inherit;
+                padding: 1px;
+                border: 1px solid #767676;
+                margin: 1px;
+            }
+            
+            input[type="text"], input[type="password"], textarea {
+                background-color: white;
+            }
+            
+            input[type="checkbox"], input[type="radio"] {
+                margin: 3px;
+            }
+            
+            button {
+                padding: 2px 6px;
+                background-color: #f0f0f0;
+            }
+            
+            pre {
+                display: block;
+                font-family: monospace;
+                white-space: pre;
+                margin: 1em 0;
+            }
+            
+            code {
+                font-family: monospace;
+            }
+            
+            /* Block elements */
+            article, section, nav, aside, header, footer, 
+            address, blockquote, figcaption, figure, hgroup,
+            main, details, summary {
+                display: block;
+                margin: 0;
+                padding: 0;
+            }
+            
+            /* Inline elements */
+            abbr, b, bdi, bdo, cite, code, data, dfn, em, i, 
+            kbd, mark, q, rp, rt, ruby, s, samp, small, 
+            strong, sub, sup, time, u, var, wbr {
+                display: inline;
+            }
+            
+            hr {
+                display: block;
+                margin-top: 0.5em;
+                margin-bottom: 0.5em;
+                border-style: inset;
+                border-width: 1px;
+            }
+            """
+            
+            # Parse the default styles and extract rules
+            try:
+                sheet = cssutils.parseString(default_styles)
+                
+                # Extract each rule and add to default_style_rules
+                for rule in sheet:
+                    if hasattr(rule, 'type') and rule.type == rule.STYLE_RULE:
+                        selector = rule.selectorText
+                        props = {}
+                        for prop in rule.style:
+                            if prop.name in self.supported_properties:
+                                props[prop.name] = prop.value
+                        if props:
+                            self.default_style_rules[selector] = props
+                
+                logger.debug("Default browser styles added")
+            except Exception as e:
+                logger.error(f"Error parsing default styles: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error adding default styles: {e}")
+    
+    def _safe_parse_css(self, css_content: str) -> Any:
+        """
+        Safely parse CSS content using cssutils, with error handling.
+        
+        Args:
+            css_content: CSS content to parse
+            
+        Returns:
+            Parsed CSS stylesheet or None if parsing failed
+        """
+        if not css_content or not isinstance(css_content, str):
+            logger.warning(f"Invalid CSS content type: {type(css_content)}")
+            return None
+            
+        try:
+            # Parse CSS content
+            sheet = cssutils.parseString(css_content)
+            
+            # Validate that sheet is iterable
+            if not hasattr(sheet, '__iter__'):
+                logger.warning(f"Parsed CSS sheet is not iterable: {type(sheet)}")
+                return None
+                
+            # Check if any rule is a string (which would cause errors when accessing .type)
+            has_string_rules = False
+            for rule in sheet:
+                if isinstance(rule, str):
+                    has_string_rules = True
+                    logger.warning(f"CSS sheet contains string rule: {rule[:50]}...")
+                    break
+                    
+            if has_string_rules:
+                # If there are string rules, we need to handle them specially
+                # For now, we'll return an empty sheet
+                logger.warning("CSS sheet contains string rules, creating empty sheet")
+                return cssutils.css.CSSStyleSheet()
+                
+            return sheet
+            
+        except Exception as e:
+            logger.error(f"Error parsing CSS with cssutils: {e}")
+            return None
+
+    def _parse_css_manually(self, css_content: str) -> dict:
+        """
+        Parse CSS content manually using regex, avoiding cssutils.
+        This is a fallback method when cssutils fails or returns problematic results.
+        
+        Args:
+            css_content: CSS content to parse
+            
+        Returns:
+            Dictionary of CSS rules by selector
+        """
+        if not css_content or not isinstance(css_content, str):
+            return {}
+            
+        css_rules = {}
+        
+        try:
+            # Use a simple regex to extract CSS rules
+            # This is a basic parser but should handle simple cases
+            import re
+            rule_pattern = r'([^{]+){([^}]*)}'
+            matches = re.findall(rule_pattern, css_content)
+            
+            for selector, declarations in matches:
+                selector = selector.strip()
+                if not selector:
+                    continue
+                    
+                # Parse declarations
+                props = {}
+                for decl in declarations.split(';'):
+                    if ':' not in decl:
+                        continue
+                        
+                    prop, val = decl.split(':', 1)
+                    prop = prop.strip()
+                    val = val.strip()
+                    
+                    if prop and val:
+                        props[prop] = val
+                
+                if props:
+                    css_rules[selector] = props
+                    
+            return css_rules
+            
+        except Exception as e:
+            logger.error(f"Error manually parsing CSS: {e}")
+            return {}
+
+    def parse(self, css_content: str, base_url: Optional[str] = None) -> dict:
         """
         Parse CSS content into a stylesheet.
         
         Args:
-            css_content: CSS content to parse
-            base_url: Optional base URL for resolving relative URLs
+            css_content: The CSS content to parse
+            base_url: Optional base URL for resolving relative URLs in the CSS
             
         Returns:
-            Parsed CSS stylesheet
+            The parsed stylesheet object
         """
+        if not css_content or not css_content.strip():
+            return {}
+            
+        stylesheet = {}
+        site_rules = {}
+        
         try:
-            # Parse using cssutils for comprehensive CSS3 support
-            stylesheet = cssutils.parseString(css_content)
+            # First try to parse with cssutils
+            sheet = self._safe_parse_css(css_content)
             
-            # Resolve URLs if a base URL is provided
+            # If cssutils parsing failed, use manual parsing as fallback
+            if not sheet:
+                logger.info("Using manual CSS parsing as fallback")
+                return self._parse_css_manually(css_content)
+            
+            # Resolve URLs if base_url is provided
             if base_url:
-                self.resolve_urls(stylesheet, base_url)
+                try:
+                    self._resolve_urls(sheet, base_url)
+                except Exception as url_err:
+                    logger.error(f"Error resolving URLs in CSS: {url_err}")
             
-            return stylesheet
+            # Extract rules from the stylesheet
+            try:
+                for rule in sheet:
+                    # Skip if rule is not an object or doesn't have a type attribute
+                    if not rule or not hasattr(rule, 'type'):
+                        continue
+                        
+                    # Handle style rules
+                    if rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                        selector = rule.selectorText
+                        properties = {}
+                        
+                        for prop in rule.style:
+                            if prop.name and prop.value:
+                                properties[prop.name] = prop.value
+                                
+                        if properties:
+                            site_rules[selector] = properties
+                            
+                    # Handle @import rules
+                    elif rule.type == cssutils.css.CSSRule.IMPORT_RULE:
+                        # Import rules are handled separately
+                        pass
+                        
+                    # Handle @media rules
+                    elif rule.type == cssutils.css.CSSRule.MEDIA_RULE:
+                        # Process rules inside @media
+                        for media_rule in rule:
+                            if hasattr(media_rule, 'type') and media_rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                                selector = media_rule.selectorText
+                                properties = {}
+                                
+                                for prop in media_rule.style:
+                                    if prop.name and prop.value:
+                                        properties[prop.name] = prop.value
+                                        
+                                if properties:
+                                    site_rules[selector] = properties
+            except Exception as rule_err:
+                logger.error(f"Error processing CSS rules: {rule_err}")
+                # Fall back to manual parsing
+                return self._parse_css_manually(css_content)
+            
+            # Return the parsed stylesheet
+            return site_rules
             
         except Exception as e:
             logger.error(f"Error parsing CSS: {e}")
+            # Fall back to manual parsing
+            return self._parse_css_manually(css_content)
             
-            # Create an empty stylesheet on error
-            stylesheet = css.CSSStyleSheet()
-            
-            # Add error information
-            error_rule = css.CSSComment(f"CSS Parser Error: {e}")
-            stylesheet.append(error_rule)
-            
-            return stylesheet
-    
     def parse_inline_styles(self, style_attr: str) -> Dict[str, str]:
         """
         Parse an inline style attribute.
@@ -133,102 +550,40 @@ class CSSParser:
         """
         return self._parse_declaration(style_attr)
     
-    def resolve_urls(self, stylesheet: css.CSSStyleSheet, base_url: str) -> None:
+    def _resolve_urls(self, stylesheet, base_url: str) -> None:
         """
-        Resolve relative URLs in a stylesheet.
+        Resolve relative URLs in CSS properties to absolute URLs.
         
         Args:
-            stylesheet: CSS stylesheet to process
-            base_url: Base URL for resolving relative URLs
+            stylesheet: The CSS stylesheet object
+            base_url: The base URL to resolve against
         """
-        # Process @import rules
-        for rule in self.get_import_rules(stylesheet):
-            if rule.href:
-                resolved_url = self._resolve_url(rule.href, base_url)
-                rule.href = resolved_url
+        import urllib.parse
         
-        # Process style rules
         for rule in stylesheet:
+            # Skip if rule is not an object, is None, or doesn't have a type attribute
+            if not rule or not hasattr(rule, 'type'):
+                continue
+                
             if rule.type == rule.STYLE_RULE:
-                self._resolve_style_rule_urls(rule, base_url)
-            elif rule.type == rule.FONT_FACE_RULE:
-                self._resolve_font_face_urls(rule, base_url)
-    
-    def _resolve_style_rule_urls(self, rule: css.CSSStyleRule, base_url: str) -> None:
-        """
-        Resolve URLs in a style rule.
-        
-        Args:
-            rule: CSS style rule to process
-            base_url: Base URL for resolving relative URLs
-        """
-        for prop in rule.style:
-            if prop.name.lower() in URL_PROPERTIES:
-                prop.value = self._resolve_css_urls(prop.value, base_url)
-    
-    def _resolve_font_face_urls(self, rule: css.CSSFontFaceRule, base_url: str) -> None:
-        """
-        Resolve URLs in a @font-face rule.
-        
-        Args:
-            rule: CSS @font-face rule to process
-            base_url: Base URL for resolving relative URLs
-        """
-        for prop in rule.style:
-            if prop.name.lower() == 'src':
-                prop.value = self._resolve_css_urls(prop.value, base_url)
-    
-    def _resolve_css_urls(self, css_value: str, base_url: str) -> str:
-        """
-        Resolve URLs in CSS values.
-        
-        Args:
-            css_value: CSS value that may contain URLs
-            base_url: Base URL for resolving relative URLs
-            
-        Returns:
-            CSS value with resolved URLs
-        """
-        def replace_url(match):
-            url = match.group(1)
-            
-            # Remove quotes if present
-            if url.startswith('"') and url.endswith('"'):
-                url = url[1:-1]
-            elif url.startswith("'") and url.endswith("'"):
-                url = url[1:-1]
-            
-            # Skip data URLs and absolute URLs
-            if url.startswith('data:') or url.startswith('http://') or url.startswith('https://'):
-                return f"url('{url}')"
-            
-            # Resolve relative URL
-            resolved_url = self._resolve_url(url, base_url)
-            
-            return f"url('{resolved_url}')"
-        
-        # URL pattern in CSS
-        url_pattern = r'url\(\s*[\'"]?([^\'"\)]+)[\'"]?\s*\)'
-        
-        # Replace all URLs
-        return re.sub(url_pattern, replace_url, css_value)
-    
-    def _resolve_url(self, url: str, base_url: str) -> str:
-        """
-        Resolve a relative URL against a base URL.
-        
-        Args:
-            url: Relative URL to resolve
-            base_url: Base URL
-            
-        Returns:
-            Resolved absolute URL
-        """
-        try:
-            return urllib.parse.urljoin(base_url, url)
-        except Exception as e:
-            logger.error(f"Error resolving URL: {e}")
-            return url
+                for prop in rule.style:
+                    if prop.name in URL_PROPERTIES and prop.value:
+                        # Look for url() expressions
+                        url_matches = re.findall(r'url\([\'"]?([^\'"]+)[\'"]?\)', prop.value)
+                        if url_matches:
+                            for url_match in url_matches:
+                                if not url_match.startswith(('http://', 'https://', 'data:', '//')):
+                                    abs_url = urllib.parse.urljoin(base_url, url_match)
+                                    prop.value = prop.value.replace(f"url({url_match})", f"url({abs_url})")
+                                    prop.value = prop.value.replace(f"url('{url_match}')", f"url('{abs_url}')")
+                                    prop.value = prop.value.replace(f'url("{url_match}")', f'url("{abs_url}")')
+            elif rule.type == rule.IMPORT_RULE:
+                # Resolve @import URLs
+                if hasattr(rule, 'href') and rule.href and not rule.href.startswith(('http://', 'https://', 'data:', '//')):
+                    rule.href = urllib.parse.urljoin(base_url, rule.href)
+                    
+    # Alias resolve_urls for backward compatibility
+    resolve_urls = _resolve_urls
     
     def get_computed_style(self, element: Element) -> Dict[str, str]:
         """
@@ -247,46 +602,110 @@ class CSSParser:
         if not document:
             return computed_style
         
-        # Get all applicable style rules
-        style_rules = self._get_applicable_style_rules(element, document)
+        # Calculate and sort rules by specificity
+        default_rules = []
+        site_rules = []
+        important_rules = []
         
-        # Apply styles in order of specificity
-        for rule in style_rules:
-            for prop_name, prop_value in rule.items():
-                computed_style[prop_name] = prop_value
+        # Collect matching default style rules
+        for selector, props in self.default_style_rules.items():
+            try:
+                if document.matches_selector(element, selector):
+                    specificity = self._calculate_specificity(selector)
+                    default_rules.append((specificity, selector, props))
+            except Exception:
+                # Skip selectors that can't be processed
+                pass
         
-        # Add inline styles (highest precedence)
+        # Sort default rules by specificity
+        default_rules.sort(key=lambda x: x[0])
+        
+        # First apply default browser styles (lowest precedence)
+        for _, selector, props in default_rules:
+            for prop_name, prop_value in props.items():
+                if not '!important' in str(prop_value):  # Skip important rules for now
+                    computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
+        
+        # Collect matching site style rules
+        for stylesheet in self.stylesheets:
+            for selector, props in stylesheet.items():
+                try:
+                    if document.matches_selector(element, selector):
+                        specificity = self._calculate_specificity(selector)
+                        site_rules.append((specificity, selector, props))
+                except Exception:
+                    # Skip selectors that can't be processed
+                    pass
+        
+        # Sort site rules by specificity
+        site_rules.sort(key=lambda x: x[0])
+        
+        # Then apply site stylesheets (higher precedence, overrides default styles)
+        for _, selector, props in site_rules:
+            for prop_name, prop_value in props.items():
+                if not '!important' in str(prop_value):  # Skip important rules for now
+                    computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
+        
+        # Add inline styles (higher precedence than site styles, lower than !important)
         inline_styles = {}
         style_attr = element.get_attribute('style')
         if style_attr:
             inline_styles = self.parse_inline_styles(style_attr)
             
             for prop_name, prop_value in inline_styles.items():
-                computed_style[prop_name] = prop_value
+                if not '!important' in str(prop_value):  # Skip important rules for now
+                    computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
+        
+        # Collect !important rules from all sources
+        # Default !important
+        for _, selector, props in default_rules:
+            for prop_name, prop_value in props.items():
+                if isinstance(prop_value, str) and '!important' in prop_value:
+                    specificity = self._calculate_specificity(selector)
+                    important_rules.append((specificity, 0, prop_name, prop_value.replace('!important', '').strip()))
+        
+        # Site !important
+        for _, selector, props in site_rules:
+            for prop_name, prop_value in props.items():
+                if isinstance(prop_value, str) and '!important' in prop_value:
+                    specificity = self._calculate_specificity(selector)
+                    important_rules.append((specificity, 1, prop_name, prop_value.replace('!important', '').strip()))
+        
+        # Inline !important (highest specificity)
+        for prop_name, prop_value in inline_styles.items():
+            if isinstance(prop_value, str) and '!important' in prop_value:
+                important_rules.append(((1, 0, 0), 2, prop_name, prop_value.replace('!important', '').strip()))
+        
+        # Sort important rules by specificity, then by source (0=default, 1=site, 2=inline)
+        important_rules.sort(key=lambda x: (x[0], x[1]))
+        
+        # Apply all !important rules last (highest precedence)
+        for _, _, prop_name, prop_value in important_rules:
+            computed_style[prop_name] = prop_value
         
         return computed_style
-    
-    def _get_applicable_style_rules(self, element: Element, document: Document) -> List[Dict[str, str]]:
+        
+    def _calculate_specificity(self, selector: str) -> tuple:
         """
-        Get all style rules that apply to an element in order of specificity.
+        Calculate the specificity of a CSS selector.
         
         Args:
-            element: The element to get styles for
-            document: The document containing stylesheets
+            selector: The CSS selector
             
         Returns:
-            List of style rule dictionaries in order of specificity
+            Tuple of (id_count, class_count, element_count)
         """
-        applicable_rules = []
+        # Count IDs
+        id_count = selector.count('#')
         
-        # TODO: Find and process all stylesheets in the document
-        # This would involve extracting stylesheets from <style> and <link> elements
+        # Count classes, attributes, and pseudo-classes
+        class_count = selector.count('.') + selector.count('[') + selector.count(':')
         
-        # For each rule, check if it applies to the element
-        # Add to list with specificity for sorting
+        # Count element names and pseudo-elements
+        element_count = len(re.findall(r'[a-zA-Z0-9]+', selector.replace('#', ' ').replace('.', ' ')))
+        element_count += selector.count('::')
         
-        # For demonstration, return an empty list for now
-        return applicable_rules
+        return (id_count, class_count, element_count)
     
     def extract_styles(self, stylesheet: css.CSSStyleSheet) -> Dict[str, Dict[str, str]]:
         """
@@ -1264,6 +1683,7 @@ class CSSPropertyParser:
                     elif bg_value[i] == ')':
                         open_parens -= 1
                         if open_parens == 0:
+                            # We found the matching closing parenthesis
                             gradient_end = i + 1
                             gradient_part = bg_value[gradient_start-7:gradient_end]  # include 'linear-' or 'radial-'
                             rest = bg_value[:gradient_start-7] + ' ' + bg_value[gradient_end:]

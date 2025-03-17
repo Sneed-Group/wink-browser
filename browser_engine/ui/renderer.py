@@ -188,7 +188,12 @@ class TkRenderer:
         # Skip comment nodes and other non-element nodes
         if element.name is None:
             # This is a text node, render it as plain text
-            if element.string and element.string.strip():
+            # Only render the text if it's directly in the body or another container,
+            # and not inside an element that will render it with get_text()
+            parent_name = element.parent.name if element.parent else None
+            safe_to_render = parent_name in ('body', 'div', 'span', 'td', 'th', 'li', 'blockquote', 'section', 'article', 'aside')
+            
+            if element.string and element.string.strip() and safe_to_render:
                 self.content_view.insert(tk.END, element.string)
             return
         
@@ -207,6 +212,14 @@ class TkRenderer:
             self._render_link(element)
         elif element.name == 'img':
             self._render_image(element)
+        elif element.name == 'input':
+            self._render_input(element)
+        elif element.name == 'button':
+            self._render_button(element)
+        elif element.name == 'select':
+            self._render_select(element)
+        elif element.name == 'form':
+            self._render_form(element)
         elif element.name == 'div':
             self._render_div(element)
         elif element.name in ('b', 'strong'):
@@ -228,8 +241,8 @@ class TkRenderer:
         elif element.name == 'li':
             # Individual list items are handled by render_list
             pass
-        elif element.name in ('script', 'style', 'meta', 'link', 'head'):
-            # Skip these elements
+        elif element.name in ('script', 'style', 'meta', 'link', 'head', 'option'):
+            # Skip these elements when processed directly (option is handled by _render_select)
             pass
         else:
             # For any other element, just render its children
@@ -246,7 +259,21 @@ class TkRenderer:
         """
         # Insert the heading text with appropriate tag
         start_index = self.content_view.index(tk.INSERT)
-        self.content_view.insert(tk.END, element.get_text() + '\n\n')
+        
+        # Process children (may contain links, bold text, etc.)
+        has_children = False
+        for child in element.children:
+            self._render_element(child)
+            has_children = True
+        
+        # Ensure heading ends with double newline
+        if not has_children:
+            # Only insert the text directly if we didn't process any children
+            self.content_view.insert(tk.END, element.get_text() + '\n\n')
+        else:
+            # Make sure we end with double newline
+            self.content_view.insert(tk.END, '\n\n')
+        
         end_index = self.content_view.index(tk.INSERT)
         
         # Apply the tag
@@ -270,10 +297,15 @@ class TkRenderer:
         
         # Ensure paragraph ends with a newline
         current_index = self.content_view.index(tk.INSERT)
-        if has_children and not current_index.endswith('.0'):
-            self.content_view.insert(tk.END, '\n\n')
+        if current_index.endswith('.0'):
+            # Already at the beginning of a new line, just add one more for spacing
+            self.content_view.insert(tk.END, '\n')
         elif not has_children:
+            # Only insert the text directly if we didn't process any children
             self.content_view.insert(tk.END, element.get_text() + '\n\n')
+        else:
+            # Otherwise just ensure we have double newline at the end
+            self.content_view.insert(tk.END, '\n\n')
         
         end_index = self.content_view.index(tk.INSERT)
         
@@ -288,11 +320,21 @@ class TkRenderer:
             element: Link element
         """
         href = element.get('href', '')
-        text = element.get_text() or href
         
         # Insert the link text with appropriate tag
         start_index = self.content_view.index(tk.INSERT)
-        self.content_view.insert(tk.END, text)
+        
+        # Process children if any
+        has_children = False
+        for child in element.children:
+            self._render_element(child)
+            has_children = True
+        
+        # If no children were processed, insert the text directly
+        if not has_children:
+            text = element.get_text() or href
+            self.content_view.insert(tk.END, text)
+        
         end_index = self.content_view.index(tk.INSERT)
         
         # Apply the tag
@@ -319,9 +361,18 @@ class TkRenderer:
             element: Image element
         """
         # In a real browser, we would download and display the image
-        # For this simplified implementation, we just show a placeholder
+        # For this simplified implementation, we show a placeholder that stays visible
         alt_text = element.get('alt', '[Image]')
-        self.content_view.insert(tk.END, f'[Image: {alt_text}]')
+        src = element.get('src', '')
+        
+        # Create a more descriptive placeholder that's less likely to disappear
+        if src:
+            placeholder = f'[Image: {alt_text} (src: {src.split("/")[-1]})]'
+        else:
+            placeholder = f'[Image: {alt_text}]'
+        
+        # Create a distinct visual marker for image placeholders
+        self.content_view.insert(tk.END, placeholder)
     
     def _render_div(self, element) -> None:
         """
@@ -343,7 +394,17 @@ class TkRenderer:
             tag: Text tag to apply
         """
         start_index = self.content_view.index(tk.INSERT)
-        self.content_view.insert(tk.END, element.get_text())
+        
+        # Process children if any
+        has_children = False
+        for child in element.children:
+            self._render_element(child)
+            has_children = True
+        
+        # If no children were processed, insert the text directly
+        if not has_children:
+            self.content_view.insert(tk.END, element.get_text())
+        
         end_index = self.content_view.index(tk.INSERT)
         
         # Apply the tag
@@ -357,7 +418,20 @@ class TkRenderer:
             element: Preformatted text element
         """
         start_index = self.content_view.index(tk.INSERT)
-        self.content_view.insert(tk.END, element.get_text() + '\n\n')
+        
+        # Process children if any
+        has_children = False
+        for child in element.children:
+            self._render_element(child)
+            has_children = True
+        
+        # If no children were processed, insert the text directly
+        if not has_children:
+            self.content_view.insert(tk.END, element.get_text())
+        
+        # Add newlines after the content
+        self.content_view.insert(tk.END, '\n\n')
+        
         end_index = self.content_view.index(tk.INSERT)
         
         # Apply the tag
@@ -392,6 +466,98 @@ class TkRenderer:
         
         self.content_view.insert(tk.END, '\n')
     
+    def _render_input(self, element) -> None:
+        """
+        Render an input element.
+        
+        Args:
+            element: Input element
+        """
+        input_type = element.get('type', 'text').lower()
+        placeholder = element.get('placeholder', '')
+        value = element.get('value', '')
+        name = element.get('name', '')
+        
+        # Render different types of inputs
+        if input_type == 'text':
+            display_text = f"[Text Input: {placeholder or name or 'text'}]"
+            if value:
+                display_text = f"[Text Input: {value}]"
+            self.content_view.insert(tk.END, display_text)
+        elif input_type == 'password':
+            self.content_view.insert(tk.END, f"[Password Input]")
+        elif input_type == 'submit':
+            self.content_view.insert(tk.END, f"[Submit Button: {value or 'Submit'}]")
+        elif input_type == 'button':
+            self.content_view.insert(tk.END, f"[Button: {value or name or 'Button'}]")
+        elif input_type == 'checkbox':
+            checked = "✓" if element.get('checked') is not None else "□"
+            self.content_view.insert(tk.END, f"{checked} ")
+        elif input_type == 'radio':
+            selected = "⚫" if element.get('checked') is not None else "○"
+            self.content_view.insert(tk.END, f"{selected} ")
+        elif input_type == 'hidden':
+            # Don't render hidden inputs
+            pass
+        elif input_type == 'search':
+            self.content_view.insert(tk.END, f"[Search Box: {placeholder or 'Search...'}]")
+        else:
+            # For other input types (file, date, etc.)
+            self.content_view.insert(tk.END, f"[{input_type.capitalize()} Input]")
+
+    def _render_button(self, element) -> None:
+        """
+        Render a button element.
+        
+        Args:
+            element: Button element
+        """
+        # Get button text
+        button_text = element.get_text().strip()
+        if not button_text:
+            button_text = element.get('value', 'Button')
+        
+        # Render button
+        self.content_view.insert(tk.END, f"[Button: {button_text}]")
+
+    def _render_form(self, element) -> None:
+        """
+        Render a form element.
+        
+        Args:
+            element: Form element
+        """
+        # Process form children
+        for child in element.children:
+            self._render_element(child)
+    
+    def _render_select(self, element) -> None:
+        """
+        Render a select dropdown.
+        
+        Args:
+            element: Select element
+        """
+        # Get attributes
+        name = element.get('name', '')
+        
+        # Find selected option if any
+        selected_option = element.find('option', selected=True)
+        if not selected_option:
+            selected_option = element.find('option')  # Get first option
+        
+        # Get display text
+        if selected_option:
+            display_text = selected_option.get_text()
+        else:
+            display_text = name or "Select"
+        
+        # Get count of options
+        option_count = len(element.find_all('option'))
+        
+        # Render select
+        self.content_view.insert(tk.END, f"[Dropdown: {display_text} ▼ ({option_count} options)]")
+
     def zoom_in(self) -> None:
         """Increase the zoom level."""
         if self.zoom_level < 3.0:  # Limit maximum zoom

@@ -20,13 +20,32 @@ class NetworkManager:
     This class handles network requests, caching, cookies, and connection management.
     """
     
-    def __init__(self, config_manager):
+    # Class-level instance for singleton use
+    _instance = None
+    
+    def __new__(cls, config_manager=None):
+        # Singleton pattern - return existing instance if available
+        if cls._instance is None:
+            cls._instance = super(NetworkManager, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self, config_manager=None):
         """
         Initialize the network manager.
         
         Args:
             config_manager: The configuration manager
         """
+        # Skip initialization if already done
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+            
+        # Use default config manager if none provided
+        if config_manager is None:
+            from browser_engine.utils.config_manager import ConfigManager
+            config_manager = ConfigManager()
+        
         self.config_manager = config_manager
         
         # Cache directory
@@ -38,6 +57,9 @@ class NetworkManager:
         
         # Create a session for reusing connections
         self.session = self._create_session()
+        
+        # Mark as initialized
+        self._initialized = True
         
         logger.info("Network manager initialized")
     
@@ -136,6 +158,63 @@ class NetworkManager:
             The HTTP response
         """
         logger.debug(f"GET request: {url}")
+        
+        # Handle special URL schemes
+        if url.startswith(('about:', 'data:', 'javascript:', 'blob:')):
+            # Create a dummy response for special URLs
+            response = requests.Response()
+            response.status_code = 200
+            response.reason = "OK"
+            
+            if url.startswith('about:'):
+                response._content = b"Special URL: about scheme"
+                response.headers['Content-Type'] = 'text/html'
+            elif url.startswith('data:'):
+                import base64
+                import urllib.parse
+                
+                # Try to parse data URL
+                try:
+                    # Format: data:[<mediatype>][;base64],<data>
+                    data_parts = url[5:].split(',', 1)
+                    if len(data_parts) != 2:
+                        raise ValueError("Invalid data URL format")
+                    
+                    metadata, data = data_parts
+                    
+                    # Set content type
+                    content_type = 'text/plain'
+                    if metadata:
+                        mime_parts = metadata.split(';')
+                        if mime_parts[0]:
+                            content_type = mime_parts[0]
+                    
+                    response.headers['Content-Type'] = content_type
+                    
+                    # Determine if base64 encoded
+                    is_base64 = 'base64' in metadata
+                    
+                    # Decode the content
+                    if is_base64:
+                        response._content = base64.b64decode(data)
+                    else:
+                        response._content = urllib.parse.unquote(data).encode('utf-8')
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing data URL: {e}")
+                    response._content = b"Error parsing data URL"
+                    response.status_code = 400
+                    response.reason = "Bad Request"
+            
+            elif url.startswith('javascript:'):
+                response._content = b"JavaScript URLs are not supported"
+                response.headers['Content-Type'] = 'text/plain'
+            
+            elif url.startswith('blob:'):
+                response._content = b"Blob URLs are not supported"
+                response.headers['Content-Type'] = 'text/plain'
+            
+            return response
         
         # Apply ad blocking if enabled
         if self.config_manager.get_config("privacy.block_ads", True):
@@ -302,4 +381,105 @@ class NetworkManager:
             if domain in url_lower:
                 return True
         
-        return False 
+        return False
+    
+    def fetch(self, url: str, resource_type: str = "script") -> Optional[str]:
+        """
+        Fetch a resource from a URL and return its content as a string.
+        
+        Args:
+            url: The URL of the resource to fetch
+            resource_type: The type of resource ("script", "style", "image", etc.)
+            
+        Returns:
+            The resource content as a string, or None if the request failed
+        """
+        try:
+            headers = {}
+            
+            # Set appropriate headers based on resource type
+            if resource_type == "script":
+                headers["Accept"] = "application/javascript, text/javascript, */*"
+            elif resource_type == "style":
+                headers["Accept"] = "text/css, */*"
+            elif resource_type == "image":
+                headers["Accept"] = "image/webp, image/apng, image/*"
+            
+            response = self.get(url, headers=headers)
+            
+            # Check for successful response
+            if response.status_code == 200:
+                # For scripts and stylesheets, return text content
+                if resource_type in ["script", "style"]:
+                    return response.text
+                # For binary resources like images, return base64 encoded content
+                elif resource_type == "image":
+                    import base64
+                    return base64.b64encode(response.content).decode('utf-8')
+                # Default fallback
+                else:
+                    return response.text
+            else:
+                logger.warning(f"Failed to fetch {resource_type} from {url}: HTTP {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error fetching {resource_type} from {url}: {e}")
+            return None
+    
+    def get_decoded_text(self, response) -> str:
+        """
+        Get decoded text from a response with robust handling of encodings.
+        
+        Args:
+            response: The response object
+            
+        Returns:
+            str: The decoded text
+        """
+        # Check if response is None
+        if response is None:
+            return "<html><body><p>Error: Response was None</p></body></html>"
+            
+        # Check if response has content
+        if not hasattr(response, 'content') or response.content is None:
+            return "<html><body><p>Error: No content in response</p></body></html>"
+            
+        # Check for empty content
+        if len(response.content) == 0:
+            return "<html><body><p>Error: Empty content in response</p></body></html>"
+        
+        # If response already has text, use it
+        if hasattr(response, 'text') and response.text is not None:
+            return response.text
+            
+        # Try to determine encoding from Content-Type header
+        content_type = response.headers.get('Content-Type', '').lower()
+        charset = None
+        
+        # Extract charset from Content-Type header
+        if 'charset=' in content_type:
+            charset = content_type.split('charset=')[1].split(';')[0].strip()
+        
+        # Try decoding with detected charset
+        if charset:
+            try:
+                return response.content.decode(charset, errors='replace')
+            except (UnicodeDecodeError, LookupError):
+                # If that fails, continue to other methods
+                logger.warning(f"Failed to decode with charset {charset}")
+        
+        # Try UTF-8 (common default)
+        try:
+            return response.content.decode('utf-8', errors='replace')
+        except UnicodeDecodeError:
+            pass
+        
+        # Try ISO-8859-1 (Latin-1, another common fallback)
+        try:
+            return response.content.decode('iso-8859-1', errors='replace')
+        except UnicodeDecodeError:
+            pass
+        
+        # Last resort, use errors='replace' to handle any encoding
+        return response.content.decode('utf-8', errors='replace') 

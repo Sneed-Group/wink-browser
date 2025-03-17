@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        img {
+            max-width: 300px;
+            border: 1px solid #ccc;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Test Page</h1>
+    
+    <!-- Use online images that should be accessible -->
+    <h2>Online Images</h2>
+    
+    <p>GitHub Logo (absolute URL):</p>
+    <img src="https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png" alt="GitHub Logo">
+    
+    <p>Python Logo (absolute URL):</p>
+    <img src="https://www.python.org/static/img/python-logo.png" alt="Python Logo">
+    
+    <!-- Local files -->
+    <h2>Local Test Images</h2>
+    <div id="local-images">
+        <p>Relative path with leading slash:</p>
+        <img src="/images/test-image.png" alt="Test Image (root-relative)">
+        
+        <p>Simple relative path:</p>
+        <img src="images/test-image.png" alt="Test Image (relative)">
+        
+        <p>Using ../</p>
+        <img src="../images/test-image.png" alt="Test Image (parent-relative)">
+        
+        <p>Absolute file URL (should work if running locally):</p>
+        <img src="file:///Volumes/HomeDrive/HomeFolders/MacMini/Code/codename-wink/images/test-image.png" alt="Test Image (absolute file)">
+    </div>
+    
+    <h2>CSS Test</h2>
+    <div style="width:200px; height:100px; background-color:blue; margin:10px;"></div>
+    
+    <h2>JavaScript Test</h2>
+    <script>
+        // This script should not appear as text
+        console.log("This should not be visible in the rendered page");
+        
+        // Try to detect if we're running from a local folder with images
+        // This won't run in our simple browser but would in a real browser
+        const currentPath = window.location.pathname;
+        console.log("Current path:", currentPath);
+    </script>
+    
+    <p>Text after script element - this should render normally.</p>
+    
+    <h2>Spacing Test</h2>
+    <h3>First heading</h3>
+    <p>Text after first heading</p>
+    
+    <h3>Second heading</h3>
+    <p>Text after second heading</p>
+    
+    <div style="border: 1px solid black; padding: 10px; margin: 10px 0;">
+        <p>Paragraph in a div</p>
+        <p>Another paragraph in the same div</p>
+    </div>
+    
+    <p>Final paragraph outside the div</p>
+</body>
+</html> 
