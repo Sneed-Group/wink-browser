@@ -51,14 +51,19 @@ class TkRenderer:
         self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Create the text widget for content display
+        # Using larger linespace to prevent text overlap
         self.content_view = tk.Text(
             self.main_frame,
             wrap=tk.WORD,
             yscrollcommand=self.v_scrollbar.set,
             xscrollcommand=self.h_scrollbar.set,
-            padx=10,
-            pady=10,
-            font=("Arial", int(12 * self.zoom_level))
+            padx=15,
+            pady=15,
+            font=("Arial", int(12 * self.zoom_level)),
+            spacing1=8,    # More aggressive spacing between lines
+            spacing2=2,    # Added spacing within lines
+            spacing3=8,    # More spacing after paragraphs
+            exportselection=0  # Prevent selection conflicts
         )
         self.content_view.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
@@ -71,66 +76,120 @@ class TkRenderer:
         
         # Make it read-only for now
         self.content_view.config(state=tk.DISABLED)
+        
+        # Store tags that have been applied to track overlaps
+        self.applied_tags = {}
+        
+        # Create counters to ensure unique IDs
+        self.tag_counter = 0
     
     def _configure_text_tags(self) -> None:
         """Configure text tags for styling."""
+        # Clear any existing tags to prevent conflicts
+        for tag in self.content_view.tag_names():
+            if tag != "sel":  # Don't remove the selection tag
+                self.content_view.tag_delete(tag)
+        
+        # Reset applied tags tracking and counter
+        self.applied_tags = {}
+        self.tag_counter = 0
+        
+        # Calculate font sizes with a bit more space to prevent overlap
+        # Base sizes for different elements
+        base_font_size = int(12 * self.zoom_level)
+        heading1_size = int(24 * self.zoom_level)
+        heading2_size = int(20 * self.zoom_level)
+        heading3_size = int(16 * self.zoom_level)
+        
+        # Larger line spacing calculation to prevent overlaps
+        def calc_spacing(font_size):
+            return int(font_size * 1.2)  # Increased spacing multiplier
+        
+        # Configure base tags for element types
         self.content_view.tag_configure(
             "h1", 
-            font=("Arial", int(24 * self.zoom_level), "bold"),
-            spacing1=10,
-            spacing3=10
+            font=("Arial", heading1_size, "bold"),
+            spacing1=calc_spacing(heading1_size),
+            spacing3=calc_spacing(heading1_size),
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "h2", 
-            font=("Arial", int(20 * self.zoom_level), "bold"),
-            spacing1=8,
-            spacing3=8
+            font=("Arial", heading2_size, "bold"),
+            spacing1=calc_spacing(heading2_size),
+            spacing3=calc_spacing(heading2_size),
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "h3", 
-            font=("Arial", int(16 * self.zoom_level), "bold"),
-            spacing1=6,
-            spacing3=6
+            font=("Arial", heading3_size, "bold"),
+            spacing1=calc_spacing(heading3_size),
+            spacing3=calc_spacing(heading3_size),
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "p", 
-            font=("Arial", int(12 * self.zoom_level)),
-            spacing1=4,
-            spacing3=4
+            font=("Arial", base_font_size),
+            spacing1=calc_spacing(base_font_size),
+            spacing3=calc_spacing(base_font_size),
+            lmargin1=0,
+            lmargin2=0
         )
         
+        # Inline tags with unique font settings but no spacing adjustments
         self.content_view.tag_configure(
             "a", 
-            font=("Arial", int(12 * self.zoom_level), "underline"),
-            foreground="blue"
+            font=("Arial", base_font_size, "underline"),
+            foreground="blue",
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "bold", 
-            font=("Arial", int(12 * self.zoom_level), "bold")
+            font=("Arial", base_font_size, "bold"),
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "italic", 
-            font=("Arial", int(12 * self.zoom_level), "italic")
+            font=("Arial", base_font_size, "italic"),
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "code", 
-            font=("Courier", int(12 * self.zoom_level)),
-            background="#f0f0f0"
+            font=("Courier", base_font_size),
+            background="#f0f0f0",
+            lmargin1=0,
+            lmargin2=0
         )
         
         self.content_view.tag_configure(
             "pre", 
-            font=("Courier", int(12 * self.zoom_level)),
+            font=("Courier", base_font_size),
             background="#f0f0f0",
-            spacing1=6,
-            spacing3=6,
-            wrap=tk.NONE
+            spacing1=calc_spacing(base_font_size),
+            spacing3=calc_spacing(base_font_size),
+            wrap=tk.NONE,
+            lmargin1=0,
+            lmargin2=0
+        )
+        
+        # Creating a tag for normal text to ensure consistent rendering
+        self.content_view.tag_configure(
+            "normal",
+            font=("Arial", base_font_size),
+            lmargin1=0,
+            lmargin2=0
         )
     
     def update(self) -> None:
@@ -138,6 +197,9 @@ class TkRenderer:
         # Clear the content
         self.content_view.config(state=tk.NORMAL)
         self.content_view.delete(1.0, tk.END)
+        
+        # Reset all tags and styling
+        self._configure_text_tags()
         
         # Get the DOM from the engine
         dom = self.engine.dom
@@ -167,7 +229,8 @@ class TkRenderer:
             dom: BeautifulSoup DOM object
         """
         # This is a simplified implementation of HTML rendering
-        # In a real browser, this would be much more complex
+        # Clear any previously tracked tags
+        self.applied_tags = {}
         
         # Extract the body content
         body = dom.find('body')
@@ -194,7 +257,31 @@ class TkRenderer:
             safe_to_render = parent_name in ('body', 'div', 'span', 'td', 'th', 'li', 'blockquote', 'section', 'article', 'aside')
             
             if element.string and element.string.strip() and safe_to_render:
-                self.content_view.insert(tk.END, element.string)
+                # Get the text with whitespace trimmed
+                text = element.string.strip()
+                
+                # Get a unique tag identifier for this text
+                self.tag_counter += 1
+                tag_name = f"normal_{self.tag_counter}"
+                
+                # Create a custom tag for this specific text
+                self.content_view.tag_configure(
+                    tag_name, 
+                    font=("Arial", int(12 * self.zoom_level))
+                )
+                
+                # Mark position to apply tag
+                start_index = self.content_view.index(tk.INSERT)
+                
+                # Insert the text
+                self.content_view.insert(tk.END, text + " ")  # Add space after text
+                
+                # Apply the tag to ONLY this text
+                end_index = self.content_view.index(tk.INSERT)
+                self.content_view.tag_add(tag_name, start_index, end_index)
+                
+                # Track this tag
+                self.applied_tags[start_index] = tag_name
             return
         
         # Handle different HTML elements
@@ -257,27 +344,48 @@ class TkRenderer:
             element: Heading element
             tag: Tag name (h1, h2, etc.)
         """
-        # Insert the heading text with appropriate tag
-        start_index = self.content_view.index(tk.INSERT)
+        # Create a unique tag for this specific heading
+        self.tag_counter += 1
+        unique_tag = f"{tag}_{self.tag_counter}"
         
-        # Process children (may contain links, bold text, etc.)
-        has_children = False
-        for child in element.children:
-            self._render_element(child)
-            has_children = True
+        # Configure the sizing based on heading level
+        if tag == "h1":
+            font_size = int(24 * self.zoom_level)
+        elif tag == "h2":
+            font_size = int(20 * self.zoom_level)
+        else:  # h3 or other headings
+            font_size = int(16 * self.zoom_level)
+            
+        # Configure a unique tag for this heading
+        self.content_view.tag_configure(
+            unique_tag,
+            font=("Arial", font_size, "bold"),
+            spacing1=int(font_size * 1.2),
+            spacing3=int(font_size * 1.2),
+            lmargin1=0,
+            lmargin2=0
+        )
         
-        # Ensure heading ends with double newline
-        if not has_children:
-            # Only insert the text directly if we didn't process any children
-            self.content_view.insert(tk.END, element.get_text() + '\n\n')
-        else:
-            # Make sure we end with double newline
-            self.content_view.insert(tk.END, '\n\n')
+        # Add spacing before heading
+        self.content_view.insert(tk.END, "\n\n")
         
+        # Get current position for tag application
+        current_line = self.content_view.index(tk.INSERT).split('.')[0]
+        start_index = f"{current_line}.0"
+        
+        # Insert the heading text
+        heading_text = element.get_text().strip()
+        self.content_view.insert(tk.END, heading_text)
+        
+        # Get end position
         end_index = self.content_view.index(tk.INSERT)
         
-        # Apply the tag
-        self.content_view.tag_add(tag, start_index, end_index)
+        # Add spacing after heading
+        self.content_view.insert(tk.END, "\n\n")
+        
+        # Apply the unique tag
+        self.content_view.tag_add(unique_tag, start_index, end_index)
+        self.applied_tags[start_index] = unique_tag
     
     def _render_paragraph(self, element) -> None:
         """
@@ -286,31 +394,48 @@ class TkRenderer:
         Args:
             element: Paragraph element
         """
-        # Insert the paragraph text with appropriate tag
-        start_index = self.content_view.index(tk.INSERT)
+        # Get a unique tag identifier for this paragraph
+        self.tag_counter += 1
+        tag_name = f"p_{self.tag_counter}"
         
-        # Process children (may contain links, bold text, etc.)
-        has_children = False
-        for child in element.children:
-            self._render_element(child)
-            has_children = True
+        # Configure this specific paragraph tag
+        self.content_view.tag_configure(
+            tag_name,
+            font=("Arial", int(12 * self.zoom_level)),
+            spacing1=int(12 * self.zoom_level * 1.2),
+            spacing3=int(12 * self.zoom_level * 1.2),
+            lmargin1=0,
+            lmargin2=0
+        )
         
-        # Ensure paragraph ends with a newline
-        current_index = self.content_view.index(tk.INSERT)
-        if current_index.endswith('.0'):
-            # Already at the beginning of a new line, just add one more for spacing
-            self.content_view.insert(tk.END, '\n')
-        elif not has_children:
-            # Only insert the text directly if we didn't process any children
-            self.content_view.insert(tk.END, element.get_text() + '\n\n')
+        # Add spacing before paragraph on a separate line
+        self.content_view.insert(tk.END, "\n")
+        
+        # Start the paragraph on a fresh line
+        current_line = self.content_view.index(tk.INSERT).split('.')[0]
+        start_index = f"{current_line}.0"
+        
+        # Extract all text content directly from the paragraph 
+        para_text = element.get_text().strip()
+        if para_text:
+            self.content_view.insert(tk.END, para_text)
         else:
-            # Otherwise just ensure we have double newline at the end
-            self.content_view.insert(tk.END, '\n\n')
+            # Handle any nested elements if there's no direct text
+            for child in element.children:
+                if child.name is not None:
+                    self._render_element(child)
         
-        end_index = self.content_view.index(tk.INSERT)
+        # Get end position before adding spacing
+        current_pos = self.content_view.index(tk.INSERT)
+        end_index = current_pos
         
-        # Apply the tag
-        self.content_view.tag_add('p', start_index, end_index)
+        # Add spacing after paragraph on a separate line
+        self.content_view.insert(tk.END, "\n")
+        
+        # Only apply tag if there was content
+        if start_index != end_index:
+            self.content_view.tag_add(tag_name, start_index, end_index)
+            self.applied_tags[start_index] = tag_name
     
     def _render_link(self, element) -> None:
         """
@@ -321,37 +446,35 @@ class TkRenderer:
         """
         href = element.get('href', '')
         
-        # Insert the link text with appropriate tag
+        # Get link text and strip whitespace
+        link_text = element.get_text().strip() or href
+        if not link_text:
+            return  # Skip empty links
+        
+        # Mark the start position for tagging
         start_index = self.content_view.index(tk.INSERT)
         
-        # Process children if any
-        has_children = False
-        for child in element.children:
-            self._render_element(child)
-            has_children = True
+        # Insert the link text
+        self.content_view.insert(tk.END, link_text)
         
-        # If no children were processed, insert the text directly
-        if not has_children:
-            text = element.get_text() or href
-            self.content_view.insert(tk.END, text)
-        
+        # Calculate end position
         end_index = self.content_view.index(tk.INSERT)
         
-        # Apply the tag
-        self.content_view.tag_add('a', start_index, end_index)
+        # Apply the tag - only to the actual link text
+        if start_index != end_index:
+            self.content_view.tag_add('a', start_index, end_index)
         
         # Bind the click event
-        # In a real browser, clicking a link would navigate to it
-        # For now, we just log a message
         def on_link_click(event):
             logger.info(f"Link clicked: {href}")
             if href:
-                # Try to navigate to the link
-                # In a real browser, we would handle relative URLs properly
                 self.engine.load_url(href)
         
         # Bind click event to the tag
         self.content_view.tag_bind('a', '<Button-1>', on_link_click)
+        
+        # Track this tag application
+        self.applied_tags[start_index] = 'a'
     
     def _render_image(self, element) -> None:
         """
@@ -360,19 +483,23 @@ class TkRenderer:
         Args:
             element: Image element
         """
-        # In a real browser, we would download and display the image
-        # For this simplified implementation, we show a placeholder that stays visible
+        # Ensure there's a newline before standalone images
+        parent_name = element.parent.name if element.parent else None
+        if parent_name not in ('a', 'button', 'span'):
+            current_pos = self.content_view.index(tk.INSERT)
+            if not current_pos.endswith('.0'):  # If not already at line start
+                self.content_view.insert(tk.END, '\n')
+        
         alt_text = element.get('alt', '[Image]')
         src = element.get('src', '')
         
-        # Create a more descriptive placeholder that's less likely to disappear
-        if src:
-            placeholder = f'[Image: {alt_text} (src: {src.split("/")[-1]})]'
-        else:
-            placeholder = f'[Image: {alt_text}]'
+        # In a real browser, we would load and display the image
+        # For now, just show the alt text
+        self.content_view.insert(tk.END, f"[Image: {alt_text}]")
         
-        # Create a distinct visual marker for image placeholders
-        self.content_view.insert(tk.END, placeholder)
+        # Ensure there's a newline after standalone images
+        if parent_name not in ('a', 'button', 'span'):
+            self.content_view.insert(tk.END, '\n')
     
     def _render_div(self, element) -> None:
         """
@@ -381,9 +508,17 @@ class TkRenderer:
         Args:
             element: Div element
         """
-        # Process all children
+        # Insert a newline before div to ensure proper spacing
+        current_pos = self.content_view.index(tk.INSERT)
+        if not current_pos.endswith('.0'):  # If not already at line start
+            self.content_view.insert(tk.END, '\n')
+            
+        # Process children
         for child in element.children:
             self._render_element(child)
+        
+        # Insert a newline after div to ensure proper spacing
+        self.content_view.insert(tk.END, '\n')
     
     def _render_formatted_text(self, element, tag: str) -> None:
         """
@@ -393,22 +528,26 @@ class TkRenderer:
             element: Element with the formatted text
             tag: Text tag to apply
         """
+        # Get the text content
+        text = element.get_text().strip()
+        if not text:
+            return  # Skip empty elements
+        
+        # Mark the start position for tagging
         start_index = self.content_view.index(tk.INSERT)
         
-        # Process children if any
-        has_children = False
-        for child in element.children:
-            self._render_element(child)
-            has_children = True
+        # Insert the text
+        self.content_view.insert(tk.END, text)
         
-        # If no children were processed, insert the text directly
-        if not has_children:
-            self.content_view.insert(tk.END, element.get_text())
-        
+        # Calculate end position
         end_index = self.content_view.index(tk.INSERT)
         
-        # Apply the tag
-        self.content_view.tag_add(tag, start_index, end_index)
+        # Apply the tag only to the content
+        if start_index != end_index:
+            self.content_view.tag_add(tag, start_index, end_index)
+        
+        # Track this tag application
+        self.applied_tags[start_index] = tag
     
     def _render_preformatted(self, element) -> None:
         """
@@ -417,6 +556,12 @@ class TkRenderer:
         Args:
             element: Preformatted text element
         """
+        # Ensure there's a line break before preformatted text
+        current_pos = self.content_view.index(tk.INSERT)
+        if not current_pos.endswith('.0'):
+            self.content_view.insert(tk.END, '\n')
+            
+        # Mark the start position for tagging
         start_index = self.content_view.index(tk.INSERT)
         
         # Process children if any
@@ -427,15 +572,19 @@ class TkRenderer:
         
         # If no children were processed, insert the text directly
         if not has_children:
-            self.content_view.insert(tk.END, element.get_text())
+            # Preserve exact whitespace in preformatted text
+            pre_text = element.get_text()
+            self.content_view.insert(tk.END, pre_text)
         
         # Add newlines after the content
         self.content_view.insert(tk.END, '\n\n')
         
-        end_index = self.content_view.index(tk.INSERT)
+        # Apply the tag - don't include the trailing newlines in the tag
+        end_index = self.content_view.index(f"{start_index} lineend +{len(element.get_text().splitlines())-1} lines")
         
-        # Apply the tag
-        self.content_view.tag_add('pre', start_index, end_index)
+        # Only apply the tag if there was actual content
+        if start_index != end_index:
+            self.content_view.tag_add('pre', start_index, end_index)
     
     def _render_list(self, element, marker: Optional[str] = None, ordered: bool = False) -> None:
         """
@@ -443,27 +592,38 @@ class TkRenderer:
         
         Args:
             element: List element
-            marker: Bullet marker for unordered lists
-            ordered: Whether this is an ordered list
+            marker: List item marker (bullet, etc.)
+            ordered: Whether the list is ordered
         """
-        # Indent the list
-        self.content_view.insert(tk.END, '\n')
-        
-        # Process list items
-        item_number = 1
-        for item in element.find_all('li', recursive=False):
-            prefix = f"{item_number}. " if ordered else marker
-            item_number += 1
-            
-            self.content_view.insert(tk.END, f"    {prefix}")
-            
-            # Process item content
-            start_pos = len(prefix) + 4  # 4 spaces for indentation
-            for child in item.children:
-                self._render_element(child)
-            
+        # Ensure there's a newline before lists
+        current_pos = self.content_view.index(tk.INSERT)
+        if not current_pos.endswith('.0'):  # If not already at line start
             self.content_view.insert(tk.END, '\n')
         
+        # Process all li elements
+        counter = 1
+        for li in element.find_all('li', recursive=False):
+            if ordered:
+                # For ordered lists, use numbers
+                prefix = f"{counter}. "
+                counter += 1
+            else:
+                # For unordered lists, use the marker (default: bullet)
+                prefix = marker or "• "
+            
+            # Insert the prefix
+            self.content_view.insert(tk.END, prefix)
+            
+            # Process li children
+            for child in li.children:
+                self._render_element(child)
+            
+            # Ensure there's a newline after each list item
+            current_pos = self.content_view.index(tk.INSERT)
+            if not current_pos.endswith('.0'):
+                self.content_view.insert(tk.END, '\n')
+        
+        # Add an extra newline after the list for spacing
         self.content_view.insert(tk.END, '\n')
     
     def _render_input(self, element) -> None:

@@ -600,6 +600,19 @@ class Document(Node):
             for child in list(self.child_nodes):
                 self.remove_child(child)
             
+            # Reset collections and references
+            self._elements_by_id = {}
+            self._elements_by_tag = {}
+            self._elements_by_class = {}
+            self._forms = []
+            self._images = []
+            self._links = []
+            self._scripts = []
+            self._stylesheets = []
+            self.document_element = None
+            self.head = None
+            self.body = None
+            
             # Set URL if provided
             if base_url:
                 self.url = base_url
@@ -820,25 +833,6 @@ class Document(Node):
                     new_element.style_content = content
                     # Also set textContent for CSS parser compatibility
                     new_element.text_content = content
-            
-            return new_element
-        
-        # Process child nodes
-        if hasattr(element, 'childNodes'):
-            for child in element.childNodes:
-                if hasattr(child, 'nodeType'):
-                    # Text node
-                    if child.nodeType == getattr(child, 'TEXT_NODE', 3):
-                        text_node = self.create_text_node(getattr(child, 'nodeValue', ''))
-                        new_element.append_child(text_node)
-                    # Element node
-                    elif child.nodeType == getattr(child, 'ELEMENT_NODE', 1):
-                        child_element = self._convert_element(child)
-                        new_element.append_child(child_element)
-                    # Comment node
-                    elif child.nodeType == getattr(child, 'COMMENT_NODE', 8):
-                        comment_node = self.create_comment(getattr(child, 'nodeValue', ''))
-                        new_element.append_child(comment_node)
         
         return new_element
     
