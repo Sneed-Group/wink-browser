@@ -345,7 +345,7 @@ class BrowserWindow:
             return
             
         # Normalize and validate URL
-        url_obj = URL(url)
+        url_obj = URL(url, base_url=self.current_url)
         normalized_url = url_obj.normalized
         
         # Update address bar

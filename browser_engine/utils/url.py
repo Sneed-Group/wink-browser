@@ -27,12 +27,13 @@ class URL:
     # Special URL schemes that don't require network requests
     SPECIAL_SCHEMES = {'about', 'data', 'javascript', 'blob', 'file'}
     
-    def __init__(self, url: str):
+    def __init__(self, url: str, base_url: Optional[str] = None):
         """
-        Initialize with a URL string.
+        Initialize a URL object.
         
         Args:
             url: URL string to parse
+            base_url: Optional base URL for resolving relative URLs
         """
         # Ensure url is a string and not None
         if url is None:
@@ -58,9 +59,36 @@ class URL:
             # Check if it looks like a domain name (contains a dot)
             if "." in url and not url.startswith("/"):
                 url = "https://" + url
-            # Local file path
-            elif url.startswith("/"):
-                url = "file://" + url
+            # Check if it's a relative path (starts with /, ./ or ../)
+            elif url.startswith("/") or url.startswith("./") or url.startswith("../"):
+                # For relative URLs, resolve against the base URL
+                if base_url:
+                    resolved_url = urllib.parse.urljoin(base_url, url)
+                    self._url = resolved_url
+                    self._parsed = urllib.parse.urlparse(resolved_url)
+                    logger.debug(f"Relative URL resolved: {url} against base: {base_url} -> {resolved_url}")
+                    return
+                else:
+                    # If no base URL, keep the relative URL as is
+                    self._url = url
+                    self._parsed = urllib.parse.urlparse("about:blank")
+                    logger.debug(f"Relative URL parsed without base: {url}")
+                    return
+            # Check if it's a plain filename or directory path
+            elif "/" in url or "." in url:
+                # For relative URLs, resolve against the base URL
+                if base_url:
+                    resolved_url = urllib.parse.urljoin(base_url, url)
+                    self._url = resolved_url
+                    self._parsed = urllib.parse.urlparse(resolved_url)
+                    logger.debug(f"Relative path resolved: {url} against base: {base_url} -> {resolved_url}")
+                    return
+                else:
+                    # If no base URL, keep the relative URL as is
+                    self._url = url
+                    self._parsed = urllib.parse.urlparse("about:blank")
+                    logger.debug(f"Relative path parsed without base: {url}")
+                    return
             # Just a search term
             else:
                 # Could use a default search engine here

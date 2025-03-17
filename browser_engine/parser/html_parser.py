@@ -732,6 +732,11 @@ class HTMLParser:
         if base_tag and base_tag.get('href'):
             base_url = base_tag['href']
         
+        # Parse the base URL to get its components
+        parsed_base = urllib.parse.urlparse(base_url)
+        base_scheme = parsed_base.scheme
+        base_netloc = parsed_base.netloc
+        
         # URL attributes by tag
         url_attributes = {
             'a': ['href'],
@@ -773,7 +778,18 @@ class HTMLParser:
                         else:
                             # Regular URL attribute
                             if value and not value.startswith(('http://', 'https://', 'data:', 'file:', '#', 'javascript:', 'mailto:')):
-                                element[attr] = urllib.parse.urljoin(base_url, value)
+                                # For relative URLs starting with /, resolve against the domain root
+                                if value.startswith('/'):
+                                    element[attr] = f"{base_scheme}://{base_netloc}{value}"
+                                # For relative URLs starting with ./ or ../, resolve against the current path
+                                elif value.startswith('./') or value.startswith('../'):
+                                    element[attr] = urllib.parse.urljoin(base_url, value)
+                                # For plain filenames or directory paths, resolve against the current path
+                                elif '/' in value or '.' in value:
+                                    element[attr] = urllib.parse.urljoin(base_url, value)
+                                # For any other relative URL, resolve against the current path
+                                else:
+                                    element[attr] = urllib.parse.urljoin(base_url, value)
         
         # Handle style attributes and inline CSS (background-image, etc.)
         for element in dom.find_all(style=True):
