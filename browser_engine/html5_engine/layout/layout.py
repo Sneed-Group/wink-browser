@@ -177,46 +177,74 @@ class LayoutBox:
         """
         Update box dimensions based on content, padding, border, and margin.
         """
-        # Ensure content dimensions are numeric
-        if self.box_metrics.content_width == 'auto':
-            self.box_metrics.content_width = 0
-        if self.box_metrics.content_height == 'auto':
-            self.box_metrics.content_height = 0
+        # Get all values before arithmetic operations
+        content_width = self.box_metrics.content_width
+        content_height = self.box_metrics.content_height
+        padding_left = self.box_metrics.padding_left
+        padding_right = self.box_metrics.padding_right
+        padding_top = self.box_metrics.padding_top
+        padding_bottom = self.box_metrics.padding_bottom
+        border_left = self.box_metrics.border_left_width
+        border_right = self.box_metrics.border_right_width
+        border_top = self.box_metrics.border_top_width
+        border_bottom = self.box_metrics.border_bottom_width
+        margin_left = self.box_metrics.margin_left
+        margin_right = self.box_metrics.margin_right
+        margin_top = self.box_metrics.margin_top
+        margin_bottom = self.box_metrics.margin_bottom
+        
+        # Convert all string values to float, handling 'auto' as 0
+        if isinstance(content_width, str):
+            content_width = 0 if content_width == 'auto' else float(content_width)
+        if isinstance(content_height, str):
+            content_height = 0 if content_height == 'auto' else float(content_height)
+        if isinstance(padding_left, str):
+            padding_left = 0 if padding_left == 'auto' else float(padding_left)
+        if isinstance(padding_right, str):
+            padding_right = 0 if padding_right == 'auto' else float(padding_right)
+        if isinstance(padding_top, str):
+            padding_top = 0 if padding_top == 'auto' else float(padding_top)
+        if isinstance(padding_bottom, str):
+            padding_bottom = 0 if padding_bottom == 'auto' else float(padding_bottom)
+        if isinstance(border_left, str):
+            border_left = 0 if border_left == 'auto' else float(border_left)
+        if isinstance(border_right, str):
+            border_right = 0 if border_right == 'auto' else float(border_right)
+        if isinstance(border_top, str):
+            border_top = 0 if border_top == 'auto' else float(border_top)
+        if isinstance(border_bottom, str):
+            border_bottom = 0 if border_bottom == 'auto' else float(border_bottom)
+        if isinstance(margin_left, str):
+            margin_left = 0 if margin_left == 'auto' else float(margin_left)
+        if isinstance(margin_right, str):
+            margin_right = 0 if margin_right == 'auto' else float(margin_right)
+        if isinstance(margin_top, str):
+            margin_top = 0 if margin_top == 'auto' else float(margin_top)
+        if isinstance(margin_bottom, str):
+            margin_bottom = 0 if margin_bottom == 'auto' else float(margin_bottom)
         
         # Padding box dimensions
-        self.box_metrics.padding_box_width = (
-            self.box_metrics.content_width + 
-            self.box_metrics.padding_left + 
-            self.box_metrics.padding_right
+        self.box_metrics.padding_box_width = int(
+            content_width + padding_left + padding_right
         )
-        self.box_metrics.padding_box_height = (
-            self.box_metrics.content_height + 
-            self.box_metrics.padding_top + 
-            self.box_metrics.padding_bottom
+        self.box_metrics.padding_box_height = int(
+            content_height + padding_top + padding_bottom
         )
         
         # Border box dimensions
-        self.box_metrics.border_box_width = (
-            self.box_metrics.padding_box_width + 
-            self.box_metrics.border_left_width + 
-            self.box_metrics.border_right_width
+        self.box_metrics.border_box_width = int(
+            self.box_metrics.padding_box_width + border_left + border_right
         )
-        self.box_metrics.border_box_height = (
-            self.box_metrics.padding_box_height + 
-            self.box_metrics.border_top_width + 
-            self.box_metrics.border_bottom_width
+        self.box_metrics.border_box_height = int(
+            self.box_metrics.padding_box_height + border_top + border_bottom
         )
         
         # Margin box dimensions
-        self.box_metrics.margin_box_width = (
-            self.box_metrics.border_box_width + 
-            self.box_metrics.margin_left + 
-            self.box_metrics.margin_right
+        self.box_metrics.margin_box_width = int(
+            self.box_metrics.border_box_width + margin_left + margin_right
         )
-        self.box_metrics.margin_box_height = (
-            self.box_metrics.border_box_height + 
-            self.box_metrics.margin_top + 
-            self.box_metrics.margin_bottom
+        self.box_metrics.margin_box_height = int(
+            self.box_metrics.border_box_height + margin_top + margin_bottom
         )
     
     def _parse_dimension_value(self, value: str) -> Union[int, str]:
@@ -338,33 +366,48 @@ class LayoutBox:
         """
         # Handle width based on display type
         if self.display == 'block' or self.display == 'flex':
-            if self.box_metrics.content_width == 'auto':
+            if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
                 # For block elements, default to full width of container minus margins
-                total_margin = self.box_metrics.margin_left + self.box_metrics.margin_right
-                total_padding = self.box_metrics.padding_left + self.box_metrics.padding_right
-                total_border = self.box_metrics.border_left_width + self.box_metrics.border_right_width
+                # Convert all values to float before arithmetic operations
+                margin_left = self.box_metrics.margin_left
+                margin_right = self.box_metrics.margin_right
+                padding_left = self.box_metrics.padding_left
+                padding_right = self.box_metrics.padding_right
+                border_left = self.box_metrics.border_left_width
+                border_right = self.box_metrics.border_right_width
                 
-                # Handle the case where some values might be 'auto'
-                if isinstance(total_margin, str) and total_margin == 'auto':
-                    total_margin = 0
-                if isinstance(total_padding, str) and total_padding == 'auto':
-                    total_padding = 0
-                if isinstance(total_border, str) and total_border == 'auto':
-                    total_border = 0
+                # Convert string values to float, handling 'auto' as 0
+                if isinstance(margin_left, str):
+                    margin_left = 0 if margin_left == 'auto' else float(margin_left)
+                if isinstance(margin_right, str):
+                    margin_right = 0 if margin_right == 'auto' else float(margin_right)
+                if isinstance(padding_left, str):
+                    padding_left = 0 if padding_left == 'auto' else float(padding_left)
+                if isinstance(padding_right, str):
+                    padding_right = 0 if padding_right == 'auto' else float(padding_right)
+                if isinstance(border_left, str):
+                    border_left = 0 if border_left == 'auto' else float(border_left)
+                if isinstance(border_right, str):
+                    border_right = 0 if border_right == 'auto' else float(border_right)
+                
+                # Calculate totals after conversion
+                total_margin = margin_left + margin_right
+                total_padding = padding_left + padding_right
+                total_border = border_left + border_right
                 
                 # Content width fills available space
-                self.box_metrics.content_width = container_width - total_margin - total_padding - total_border
+                self.box_metrics.content_width = int(container_width - total_margin - total_padding - total_border)
         
         elif self.display == 'inline' or self.display == 'inline-block':
-            if self.box_metrics.content_width == 'auto':
+            if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
                 # For inline elements, content determines width
                 # For simplicity, use a default width based on content
                 if self.element and hasattr(self.element, 'text_content') and self.element.text_content:
                     # Approximate width based on text length (very simple approach)
                     text_length = len(self.element.text_content)
                     font_size = self._parse_dimension_value(self.computed_style.get('font-size', '16px'))
-                    if font_size == 'auto':
-                        font_size = 16  # Default font size
+                    if isinstance(font_size, str):
+                        font_size = 16 if font_size == 'auto' else float(font_size)
                         
                     # Rough estimate: each character is about 0.6 times the font size width
                     self.box_metrics.content_width = int(text_length * font_size * 0.6)
@@ -379,49 +422,105 @@ class LayoutBox:
         """
         Calculate the height of this box based on CSS properties and content.
         """
-        if self.box_metrics.content_height == 'auto':
+        if isinstance(self.box_metrics.content_height, str) and self.box_metrics.content_height == 'auto':
             # Calculate height based on children
             if self.children:
                 max_child_bottom = 0
                 
                 for child in self.children:
-                    child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height
+                    # Get all values before arithmetic operations
+                    child_y = child.box_metrics.y
+                    child_margin_top = child.box_metrics.margin_top
+                    child_margin_bottom = child.box_metrics.margin_bottom
+                    child_border_top = child.box_metrics.border_top_width
+                    child_border_bottom = child.box_metrics.border_bottom_width
+                    child_padding_top = child.box_metrics.padding_top
+                    child_padding_bottom = child.box_metrics.padding_bottom
+                    child_content_height = child.box_metrics.content_height
+                    
+                    # Convert all string values to float, handling 'auto' as 0
+                    if isinstance(child_y, str):
+                        child_y = 0 if child_y == 'auto' else float(child_y)
+                    if isinstance(child_margin_top, str):
+                        child_margin_top = 0 if child_margin_top == 'auto' else float(child_margin_top)
+                    if isinstance(child_margin_bottom, str):
+                        child_margin_bottom = 0 if child_margin_bottom == 'auto' else float(child_margin_bottom)
+                    if isinstance(child_border_top, str):
+                        child_border_top = 0 if child_border_top == 'auto' else float(child_border_top)
+                    if isinstance(child_border_bottom, str):
+                        child_border_bottom = 0 if child_border_bottom == 'auto' else float(child_border_bottom)
+                    if isinstance(child_padding_top, str):
+                        child_padding_top = 0 if child_padding_top == 'auto' else float(child_padding_top)
+                    if isinstance(child_padding_bottom, str):
+                        child_padding_bottom = 0 if child_padding_bottom == 'auto' else float(child_padding_bottom)
+                    if isinstance(child_content_height, str):
+                        child_content_height = 0 if child_content_height == 'auto' else float(child_content_height)
+                    
+                    # Calculate child's total height
+                    child_height = (child_content_height + 
+                                  child_padding_top + child_padding_bottom +
+                                  child_border_top + child_border_bottom +
+                                  child_margin_top + child_margin_bottom)
+                    
+                    child_bottom = child_y + child_height
                     max_child_bottom = max(max_child_bottom, child_bottom)
                 
-                # Content height is the distance from the top of the content box to the bottom of the last child
-                content_top = self.box_metrics.y + self.box_metrics.margin_top + self.box_metrics.border_top_width + self.box_metrics.padding_top
-                self.box_metrics.content_height = max(0, max_child_bottom - content_top)
+                # Get all values for content top calculation
+                content_y = self.box_metrics.y
+                margin_top = self.box_metrics.margin_top
+                border_top = self.box_metrics.border_top_width
+                padding_top = self.box_metrics.padding_top
+                
+                # Convert all string values to float, handling 'auto' as 0
+                if isinstance(content_y, str):
+                    content_y = 0 if content_y == 'auto' else float(content_y)
+                if isinstance(margin_top, str):
+                    margin_top = 0 if margin_top == 'auto' else float(margin_top)
+                if isinstance(border_top, str):
+                    border_top = 0 if border_top == 'auto' else float(border_top)
+                if isinstance(padding_top, str):
+                    padding_top = 0 if padding_top == 'auto' else float(padding_top)
+                
+                # Calculate content top
+                content_top = content_y + margin_top + border_top + padding_top
+                self.box_metrics.content_height = int(max(0, max_child_bottom - content_top))
             else:
                 # For elements with text content but no children
                 if self.element and hasattr(self.element, 'text_content') and self.element.text_content:
                     # Approximate height based on text content and line height
                     font_size = self._parse_dimension_value(self.computed_style.get('font-size', '16px'))
+                    if isinstance(font_size, str):
+                        font_size = 16 if font_size == 'auto' else float(font_size)
+                    
                     line_height_value = self.computed_style.get('line-height', '1.2')
                     
                     try:
                         line_height_multiplier = float(line_height_value)
+                        line_height = int(font_size * line_height_multiplier)
                     except ValueError:
                         # If line-height has units, parse it as a dimension
                         line_height = self._parse_dimension_value(line_height_value)
-                        if line_height == 'auto':
-                            line_height = int(font_size * 1.2)  # Default
-                    else:
-                        line_height = int(font_size * line_height_multiplier)
+                        if isinstance(line_height, str):
+                            line_height = int(font_size * 1.2) if line_height == 'auto' else float(line_height)
                     
                     # Calculate how many lines the text might need
-                    if self.box_metrics.content_width != 'auto' and self.box_metrics.content_width > 0:
+                    content_width = self.box_metrics.content_width
+                    if isinstance(content_width, str):
+                        content_width = 0 if content_width == 'auto' else float(content_width)
+                    
+                    if content_width > 0:
                         # Rough estimate: each character is about 0.6 times the font size width
-                        chars_per_line = int(self.box_metrics.content_width / (font_size * 0.6))
+                        chars_per_line = int(content_width / (font_size * 0.6))
                         if chars_per_line < 1:
                             chars_per_line = 1
                         
                         text_length = len(self.element.text_content)
                         num_lines = max(1, math.ceil(text_length / chars_per_line))
                         
-                        self.box_metrics.content_height = num_lines * line_height
+                        self.box_metrics.content_height = int(num_lines * line_height)
                     else:
                         # Default to one line if we can't calculate width
-                        self.box_metrics.content_height = line_height
+                        self.box_metrics.content_height = int(line_height)
                 else:
                     # Empty element with no explicit height
                     # Ensure a minimum height based on tag type
@@ -447,24 +546,56 @@ class LayoutBox:
         Args:
             container_width: Width of the containing block
         """
+        # Get all values before arithmetic operations
+        margin_top = self.box_metrics.margin_top
+        margin_left = self.box_metrics.margin_left
+        border_top = self.box_metrics.border_top_width
+        border_left = self.box_metrics.border_left_width
+        padding_top = self.box_metrics.padding_top
+        padding_left = self.box_metrics.padding_left
+        content_width = self.box_metrics.content_width
+        
+        # Convert string values to float, handling 'auto' as 0
+        if isinstance(margin_top, str):
+            margin_top = 0 if margin_top == 'auto' else float(margin_top)
+        if isinstance(margin_left, str):
+            margin_left = 0 if margin_left == 'auto' else float(margin_left)
+        if isinstance(border_top, str):
+            border_top = 0 if border_top == 'auto' else float(border_top)
+        if isinstance(border_left, str):
+            border_left = 0 if border_left == 'auto' else float(border_left)
+        if isinstance(padding_top, str):
+            padding_top = 0 if padding_top == 'auto' else float(padding_top)
+        if isinstance(padding_left, str):
+            padding_left = 0 if padding_left == 'auto' else float(padding_left)
+        if isinstance(content_width, str):
+            content_width = 0 if content_width == 'auto' else float(content_width)
+        
         # Current y position for laying out children
-        current_y = self.box_metrics.y + self.box_metrics.margin_top + self.box_metrics.border_top_width + self.box_metrics.padding_top
+        current_y = self.box_metrics.y + margin_top + border_top + padding_top
         
         # Adjust x for content area
-        content_x = self.box_metrics.x + self.box_metrics.margin_left + self.box_metrics.border_left_width + self.box_metrics.padding_left
+        content_x = self.box_metrics.x + margin_left + border_left + padding_left
         
         # Available width for children
-        if self.box_metrics.content_width == 'auto':
-            child_container_width = container_width - self.box_metrics.margin_left - self.box_metrics.margin_right
+        if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
+            child_container_width = container_width - margin_left - self.box_metrics.margin_right
+            if isinstance(self.box_metrics.margin_right, str):
+                child_container_width = container_width - margin_left - (0 if self.box_metrics.margin_right == 'auto' else float(self.box_metrics.margin_right))
         else:
-            child_container_width = self.box_metrics.content_width
+            child_container_width = content_width
         
         # Layout children
         for child in self.children:
             child.layout(child_container_width, content_x, current_y)
             
+            # Get child's margin box height
+            child_margin_box_height = child.box_metrics.margin_box_height
+            if isinstance(child_margin_box_height, str):
+                child_margin_box_height = 0 if child_margin_box_height == 'auto' else float(child_margin_box_height)
+            
             # Move down for next child
-            current_y += child.box_metrics.margin_box_height
+            current_y += child_margin_box_height
     
     def _layout_inline(self, container_width: int) -> None:
         """
@@ -473,19 +604,43 @@ class LayoutBox:
         Args:
             container_width: Width of the containing block
         """
-        # For now, inline elements don't affect their children's layout much
-        # They will flow within their parent's content area
+        # Get all values before arithmetic operations
+        margin_left = self.box_metrics.margin_left
+        margin_top = self.box_metrics.margin_top
+        border_left = self.box_metrics.border_left_width
+        border_top = self.box_metrics.border_top_width
+        padding_left = self.box_metrics.padding_left
+        padding_top = self.box_metrics.padding_top
+        
+        # Convert string values to float, handling 'auto' as 0
+        if isinstance(margin_left, str):
+            margin_left = 0 if margin_left == 'auto' else float(margin_left)
+        if isinstance(margin_top, str):
+            margin_top = 0 if margin_top == 'auto' else float(margin_top)
+        if isinstance(border_left, str):
+            border_left = 0 if border_left == 'auto' else float(border_left)
+        if isinstance(border_top, str):
+            border_top = 0 if border_top == 'auto' else float(border_top)
+        if isinstance(padding_left, str):
+            padding_left = 0 if padding_left == 'auto' else float(padding_left)
+        if isinstance(padding_top, str):
+            padding_top = 0 if padding_top == 'auto' else float(padding_top)
         
         # Current x position for laying out children
-        content_x = self.box_metrics.x + self.box_metrics.margin_left + self.box_metrics.border_left_width + self.box_metrics.padding_left
-        content_y = self.box_metrics.y + self.box_metrics.margin_top + self.box_metrics.border_top_width + self.box_metrics.padding_top
+        content_x = self.box_metrics.x + margin_left + border_left + padding_left
+        content_y = self.box_metrics.y + margin_top + border_top + padding_top
         
         # Layout children (simplified for now)
         for child in self.children:
             child.layout(container_width, content_x, content_y)
             
+            # Get child's margin box width
+            child_margin_box_width = child.box_metrics.margin_box_width
+            if isinstance(child_margin_box_width, str):
+                child_margin_box_width = 0 if child_margin_box_width == 'auto' else float(child_margin_box_width)
+            
             # Move right for next child
-            content_x += child.box_metrics.margin_box_width
+            content_x += child_margin_box_width
     
     def _layout_inline_block(self, container_width: int) -> None:
         """
@@ -494,20 +649,43 @@ class LayoutBox:
         Args:
             container_width: Width of the containing block
         """
-        # Inline-block is a hybrid: it flows inline but lays out its contents like a block
+        # Get all values before arithmetic operations
+        margin_left = self.box_metrics.margin_left
+        margin_top = self.box_metrics.margin_top
+        border_left = self.box_metrics.border_left_width
+        border_top = self.box_metrics.border_top_width
+        padding_left = self.box_metrics.padding_left
+        padding_top = self.box_metrics.padding_top
+        content_width = self.box_metrics.content_width
+        
+        # Convert string values to float, handling 'auto' as 0
+        if isinstance(margin_left, str):
+            margin_left = 0 if margin_left == 'auto' else float(margin_left)
+        if isinstance(margin_top, str):
+            margin_top = 0 if margin_top == 'auto' else float(margin_top)
+        if isinstance(border_left, str):
+            border_left = 0 if border_left == 'auto' else float(border_left)
+        if isinstance(border_top, str):
+            border_top = 0 if border_top == 'auto' else float(border_top)
+        if isinstance(padding_left, str):
+            padding_left = 0 if padding_left == 'auto' else float(padding_left)
+        if isinstance(padding_top, str):
+            padding_top = 0 if padding_top == 'auto' else float(padding_top)
+        if isinstance(content_width, str):
+            content_width = 0 if content_width == 'auto' else float(content_width)
         
         # Adjust for content area
-        content_x = self.box_metrics.x + self.box_metrics.margin_left + self.box_metrics.border_left_width + self.box_metrics.padding_left
-        content_y = self.box_metrics.y + self.box_metrics.margin_top + self.box_metrics.border_top_width + self.box_metrics.padding_top
+        content_x = self.box_metrics.x + margin_left + border_left + padding_left
+        content_y = self.box_metrics.y + margin_top + border_top + padding_top
         
         # Available width for children
-        if self.box_metrics.content_width == 'auto':
+        if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
             # Default to a reasonable width if not specified
             child_container_width = 100  # A default value
             self.box_metrics.content_width = child_container_width
             self._update_box_dimensions()
         else:
-            child_container_width = self.box_metrics.content_width
+            child_container_width = content_width
         
         # Current y within the content box
         current_y = content_y
@@ -516,8 +694,13 @@ class LayoutBox:
         for child in self.children:
             child.layout(child_container_width, content_x, current_y)
             
+            # Get child's margin box height
+            child_margin_box_height = child.box_metrics.margin_box_height
+            if isinstance(child_margin_box_height, str):
+                child_margin_box_height = 0 if child_margin_box_height == 'auto' else float(child_margin_box_height)
+            
             # Move down for next child (block layout)
-            current_y += child.box_metrics.margin_box_height
+            current_y += child_margin_box_height
     
     def _layout_flex(self, container_width: int) -> None:
         """

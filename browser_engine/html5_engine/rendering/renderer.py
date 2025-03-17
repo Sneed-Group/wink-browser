@@ -2614,32 +2614,60 @@ class HTML5Renderer:
 
     def _calculate_dimension(self, value, container_dimension: int, element_type: str = None, dimension_type: str = 'width', layout_box=None) -> int:
         """
-        Calculate a dimension value with consistent fallback behavior.
+        Calculate a dimension value, handling 'auto' and percentages.
         
         Args:
-            value: The dimension value to calculate (can be int, float, str, or None)
-            container_dimension: The parent/container dimension to use for calculations
-            element_type: The type of element (e.g., 'block', 'inline', etc.)
-            dimension_type: The type of dimension being calculated ('width' or 'height')
-            layout_box: Optional layout box for additional metrics
+            value: The dimension value to calculate
+            container_dimension: The dimension of the containing block
+            element_type: Type of element ('block', 'inline', etc.)
+            dimension_type: Type of dimension ('width' or 'height')
+            layout_box: The layout box being calculated
             
         Returns:
-            int: The calculated dimension value
+            Calculated dimension in pixels
         """
         try:
             # Handle numeric values
             if isinstance(value, (int, float)):
                 return int(value)
-                
+            
             # Handle string values
             if isinstance(value, str):
                 # Handle 'auto'
                 if value == 'auto':
                     if dimension_type == 'width':
                         if element_type == 'block':
-                            # Block elements take full container width minus margins
+                            # Block elements take full container width minus margins, padding, and borders
                             if layout_box:
-                                return container_dimension - layout_box.box_metrics.margin_left - layout_box.box_metrics.margin_right
+                                # Get all box model properties
+                                margin_left = layout_box.box_metrics.margin_left
+                                margin_right = layout_box.box_metrics.margin_right
+                                padding_left = layout_box.box_metrics.padding_left
+                                padding_right = layout_box.box_metrics.padding_right
+                                border_left = layout_box.box_metrics.border_left_width
+                                border_right = layout_box.box_metrics.border_right_width
+                                
+                                # Convert string values to float, handling 'auto' as 0
+                                if isinstance(margin_left, str):
+                                    margin_left = 0 if margin_left == 'auto' else float(margin_left)
+                                if isinstance(margin_right, str):
+                                    margin_right = 0 if margin_right == 'auto' else float(margin_right)
+                                if isinstance(padding_left, str):
+                                    padding_left = 0 if padding_left == 'auto' else float(padding_left)
+                                if isinstance(padding_right, str):
+                                    padding_right = 0 if padding_right == 'auto' else float(padding_right)
+                                if isinstance(border_left, str):
+                                    border_left = 0 if border_left == 'auto' else float(border_left)
+                                if isinstance(border_right, str):
+                                    border_right = 0 if border_right == 'auto' else float(border_right)
+                                
+                                # Calculate total box model properties
+                                total_margin = margin_left + margin_right
+                                total_padding = padding_left + padding_right
+                                total_border = border_left + border_right
+                                
+                                # Content width fills available space
+                                return int(container_dimension - total_margin - total_padding - total_border)
                             return int(container_dimension * 0.95)  # 95% of container if no metrics
                         else:
                             # Inline elements use percentage of container
