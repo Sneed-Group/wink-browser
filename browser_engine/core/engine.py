@@ -25,6 +25,7 @@ from browser_engine.extensions.manager import ExtensionManager
 from browser_engine.utils.cache import Cache
 from browser_engine.utils.network import NetworkManager
 from browser_engine.utils.config import Config
+from browser_engine.utils.url import URL
 
 logger = logging.getLogger(__name__)
 
@@ -129,28 +130,125 @@ class BrowserEngine:
             url: The URL to load
         """
         try:
-            # Check cache first if not in private mode
-            cached_content = None
-            if not self.private_mode:
-                cached_content = self.cache.get(url)
+            # Parse URL
+            parsed_url = URL(url)
             
-            if cached_content:
-                logger.debug(f"Using cached content for {url}")
-                html_content = cached_content
-                self.load_progress = 50
-                self._notify_loading_state()
-            else:
-                # Request the page
-                self.load_progress = 10
-                self._notify_loading_state()
-                
-                # Check if the request should be blocked
-                if self.ad_blocker.should_block_url(url):
-                    logger.info(f"Blocking URL: {url}")
-                    self._handle_blocked_page(url)
+            # Handle special URLs
+            if parsed_url.scheme in ['about', 'data', 'javascript', 'blob', 'file']:
+                content = self._handle_special_url(str(parsed_url))
+                if content:
+                    self.dom = self.html_parser.parse(content)
+                    self.page_title = "Wink Browser"
+                    self.current_url = str(parsed_url)
+                    self.load_progress = 100
+                    self.is_loading = False
+                    self._notify_loading_state()
                     return
-                
-                # Fetch the page
+            
+            # Continue with regular URL loading
+            self._load_regular_url(str(parsed_url))
+            
+        except Exception as e:
+            logger.error(f"Error loading URL {url}: {e}")
+            self._handle_error_page(url, str(e))
+            self.load_progress = 100
+            self.is_loading = False
+            self._notify_loading_state()
+    
+    def _handle_special_url(self, url: str) -> Optional[str]:
+        """
+        Handle special URLs like about:blank.
+        
+        Args:
+            url: Special URL to handle
+            
+        Returns:
+            str: HTML content or None if not handled
+        """
+        if url == "about:blank":
+            return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>New Tab</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        padding: 0;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        background-color: #f5f5f5;
+                    }
+                    .container {
+                        text-align: center;
+                    }
+                    h1 {
+                        color: #333;
+                        font-size: 24px;
+                        margin-bottom: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Welcome to Wink Browser</h1>
+                    <p>A privacy-focused web browser</p>
+                </div>
+            </body>
+            </html>
+            """
+        elif url.startswith("about:"):
+            # Handle other about: URLs
+            page_name = url.split(':', 1)[1]
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>About: {page_name}</title>
+            </head>
+            <body>
+                <h1>About: {page_name}</h1>
+                <p>This is a special page in Wink Browser.</p>
+            </body>
+            </html>
+            """
+        
+        # Not a handled special URL
+        return None
+    
+    def _load_regular_url(self, url: str) -> None:
+        """
+        Load a regular HTTP/HTTPS URL.
+        
+        Args:
+            url: URL to load
+        """
+        # Check cache first if not in private mode
+        cached_content = None
+        if not self.private_mode:
+            cached_content = self.cache.get(url)
+        
+        if cached_content:
+            logger.debug(f"Using cached content for {url}")
+            html_content = cached_content
+            self.load_progress = 50
+            self._notify_loading_state()
+        else:
+            # Request the page
+            self.load_progress = 10
+            self._notify_loading_state()
+            
+            # Check if the request should be blocked
+            if self.ad_blocker and self.ad_blocker.should_block_url(url):
+                logger.info(f"Blocking URL: {url}")
+                self._handle_blocked_page(url)
+                return
+            
+            # Fetch the page
+            try:
                 response = self.network.get(url)
                 self.load_progress = 40
                 self._notify_loading_state()
@@ -160,47 +258,47 @@ class BrowserEngine:
                 # Cache the content if not in private mode
                 if not self.private_mode:
                     self.cache.set(url, html_content)
-            
-            # Parse HTML
-            self.load_progress = 60
+            except Exception as e:
+                logger.error(f"Error fetching {url}: {e}")
+                self._handle_error_page(url, str(e))
+                return
+        
+        # Parse HTML
+        self.load_progress = 60
+        self._notify_loading_state()
+        self.dom = self.html_parser.parse(html_content)
+        
+        # Extract title
+        title_tag = self.dom.find('title')
+        self.page_title = title_tag.text if title_tag else url
+        
+        # Process stylesheets
+        self.load_progress = 70
+        self._notify_loading_state()
+        self._process_stylesheets()
+        
+        # Download resources (images, etc.) unless in text-only mode
+        if not self.text_only_mode:
+            self.load_progress = 80
             self._notify_loading_state()
-            self.dom = self.html_parser.parse(html_content)
-            
-            # Extract title
-            title_tag = self.dom.find('title')
-            self.page_title = title_tag.text if title_tag else url
-            
-            # Process stylesheets
-            self.load_progress = 70
+            self._load_resources(url)
+        
+        # Execute JavaScript unless in text-only mode
+        if not self.text_only_mode:
+            self.load_progress = 90
             self._notify_loading_state()
-            self._process_stylesheets()
-            
-            # Download resources (images, etc.) unless in text-only mode
-            if not self.text_only_mode:
-                self.load_progress = 80
-                self._notify_loading_state()
-                self._load_resources(url)
-            
-            # Execute JavaScript unless in text-only mode
-            if not self.text_only_mode:
-                self.load_progress = 90
-                self._notify_loading_state()
-                self._execute_scripts()
-            
-            # Update history
-            self._update_history(url)
-            self.current_url = url
-            
-            # Finished loading
-            self.load_progress = 100
-            self.is_loading = False
-            self._notify_loading_state()
-            
-            logger.info(f"Successfully loaded {url}")
-            
-        except Exception as e:
-            logger.exception(f"Error loading URL {url}: {e}")
-            self._handle_page_error(url, str(e))
+            self._execute_scripts()
+        
+        # Update history
+        self._update_history(url)
+        self.current_url = url
+        
+        # Finished loading
+        self.load_progress = 100
+        self.is_loading = False
+        self._notify_loading_state()
+        
+        logger.info(f"Successfully loaded {url}")
     
     def _process_stylesheets(self) -> None:
         """Process and apply stylesheets."""
@@ -347,7 +445,7 @@ class BrowserEngine:
         self.is_loading = False
         self._notify_loading_state()
     
-    def _handle_page_error(self, url: str, error: str) -> None:
+    def _handle_error_page(self, url: str, error: str) -> None:
         """
         Handle a page loading error.
         

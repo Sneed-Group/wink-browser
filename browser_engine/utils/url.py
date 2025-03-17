@@ -24,6 +24,9 @@ class URL:
         'wss': 443
     }
     
+    # Special URL schemes that don't require network requests
+    SPECIAL_SCHEMES = {'about', 'data', 'javascript', 'blob', 'file'}
+    
     def __init__(self, url: str):
         """
         Initialize with a URL string.
@@ -34,10 +37,25 @@ class URL:
         if not url:
             url = "about:blank"
         
-        # Ensure URL has scheme
-        if "://" not in url and not url.startswith("about:") and not url.startswith("data:"):
-            # Assume http if no scheme
-            url = "http://" + url
+        # Check for known special schemes
+        if any(url.startswith(f"{scheme}:") for scheme in self.SPECIAL_SCHEMES):
+            self._url = url
+            self._parsed = urllib.parse.urlparse(url)
+            logger.debug(f"Special URL parsed: {url}")
+            return
+            
+        # Ensure URL has scheme - default to https:// for security
+        if "://" not in url:
+            # Check if it looks like a domain name (contains a dot)
+            if "." in url and not url.startswith("/"):
+                url = "https://" + url
+            # Local file path
+            elif url.startswith("/"):
+                url = "file://" + url
+            # Just a search term
+            else:
+                # Could use a default search engine here
+                url = "https://www.google.com/search?q=" + urllib.parse.quote(url)
         
         self._url = url
         self._parsed = urllib.parse.urlparse(url)

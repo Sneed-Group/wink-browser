@@ -56,9 +56,11 @@ def main():
     config = Config(args.config)
     logger.debug("Configuration loaded")
     
-    # Import UI components here to avoid circular imports
+    # Import engine and UI components here to avoid circular imports
     try:
+        from browser_engine.core.engine import BrowserEngine
         from browser_engine.ui.browser_window import BrowserWindow
+        from browser_engine.privacy.ad_blocker import AdBlocker
     except ImportError as e:
         logger.error(f"Failed to import UI components: {e}")
         print(f"Error: Failed to import UI components: {e}")
@@ -66,11 +68,22 @@ def main():
     
     # Create and run the browser window
     try:
-        # Initialize browser window
-        browser = BrowserWindow(
+        # Initialize ad blocker
+        ad_blocker = None
+        try:
+            ad_blocker = AdBlocker()
+        except ImportError:
+            logger.warning("adblockparser not available. Ad blocking will be limited.")
+        
+        # Initialize browser engine
+        engine = BrowserEngine(
+            text_only_mode=False,
             private_mode=args.private,
-            config=config
+            ad_blocker=ad_blocker
         )
+        
+        # Initialize browser window
+        browser = BrowserWindow(engine=engine)
         
         # Open URL if provided
         if args.url:
@@ -81,7 +94,7 @@ def main():
             browser.navigate_to(homepage)
         
         # Start the main loop
-        browser.run()
+        browser.start()
         
     except Exception as e:
         logger.error(f"Error starting browser: {e}", exc_info=True)

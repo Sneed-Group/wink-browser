@@ -10,6 +10,7 @@ from browser_engine.utils.bookmarks import BookmarkManager
 from browser_engine.utils.network import NetworkManager
 from browser_engine.utils.download import DownloadManager
 from browser_engine.utils.logging import setup_logging, log_exception, PerformanceLogger
+from browser_engine.utils.cache import Cache
 
 __all__ = [
     'Config',
@@ -21,4 +22,5 @@ __all__ = [
     'setup_logging',
     'log_exception',
     'PerformanceLogger',
+    'Cache',
 ]

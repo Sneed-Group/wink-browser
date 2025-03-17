@@ -15,6 +15,7 @@ from browser_engine.core.engine import BrowserEngine
 from browser_engine.ui.renderer import TkRenderer
 from browser_engine.ui.dialogs import SettingsDialog
 from browser_engine.utils.config import Config
+from browser_engine.utils.url import URL
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,11 @@ class BrowserWindow:
         Args:
             url: The URL to navigate to
         """
-        self.engine.load_url(url)
+        # Make sure URL is properly formatted using our URL utility
+        parsed_url = URL(url)
+        
+        # Load the URL using the engine
+        self.engine.load_url(str(parsed_url))
     
     def _go_back(self) -> None:
         """Navigate back in history."""
