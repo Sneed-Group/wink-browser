@@ -316,12 +316,18 @@ class LayoutEngine:
             
             # Calculate width if it needs to be determined
             if isinstance(layout_box.box_metrics.width, str):
-                try:
-                    layout_box.box_metrics.width = float(layout_box.box_metrics.width)
-                except (ValueError, TypeError):
+                if layout_box.box_metrics.width == 'auto':
                     layout_box.box_metrics.width = 0
+                else:
+                    try:
+                        layout_box.box_metrics.width = float(layout_box.box_metrics.width)
+                    except (ValueError, TypeError):
+                        layout_box.box_metrics.width = 0
             
-            if layout_box.box_metrics.width == 0:
+            # Convert width to float for comparison
+            width = float(layout_box.box_metrics.width) if isinstance(layout_box.box_metrics.width, (int, float)) else 0
+            
+            if width == 0:
                 if layout_box.display == DisplayType.BLOCK:
                     # Block elements take up full container width minus margins
                     margin_left = layout_box.box_metrics.margin_left
@@ -358,20 +364,26 @@ class LayoutEngine:
             
             # Calculate height if it needs to be determined
             if isinstance(layout_box.box_metrics.height, str):
-                try:
-                    layout_box.box_metrics.height = float(layout_box.box_metrics.height)
-                except (ValueError, TypeError):
+                if layout_box.box_metrics.height == 'auto':
                     layout_box.box_metrics.height = 0
+                else:
+                    try:
+                        layout_box.box_metrics.height = float(layout_box.box_metrics.height)
+                    except (ValueError, TypeError):
+                        layout_box.box_metrics.height = 0
             
-            if layout_box.box_metrics.height == 0:
+            # Convert height to float for comparison
+            height = float(layout_box.box_metrics.height) if isinstance(layout_box.box_metrics.height, (int, float)) else 0
+            
+            if height == 0:
                 # First try to calculate height based on children
                 height = 0
                 for child in layout_box.children:
                     try:
                         # Ensure child metrics are numeric
-                        child_y = child.box_metrics.y if isinstance(child.box_metrics.y, (int, float)) else 0
-                        child_height = child.box_metrics.margin_box_height if isinstance(child.box_metrics.margin_box_height, (int, float)) else 0
-                        layout_y = layout_box.box_metrics.y if isinstance(layout_box.box_metrics.y, (int, float)) else 0
+                        child_y = float(child.box_metrics.y) if isinstance(child.box_metrics.y, (int, float)) else 0
+                        child_height = float(child.box_metrics.margin_box_height) if isinstance(child.box_metrics.margin_box_height, (int, float)) else 0
+                        layout_y = float(layout_box.box_metrics.y) if isinstance(layout_box.box_metrics.y, (int, float)) else 0
                         
                         child_bottom = child_y + child_height - layout_y
                         height = max(height, child_bottom)
@@ -439,7 +451,7 @@ class LayoutEngine:
         # Calculate available width safely
         try:
             if isinstance(layout_box.box_metrics.content_width, (int, float)):
-                available_width = layout_box.box_metrics.content_width
+                available_width = float(layout_box.box_metrics.content_width)
             elif isinstance(layout_box.box_metrics.content_width, str):
                 if layout_box.box_metrics.content_width == 'auto':
                     # For auto width, use container width minus padding and borders
@@ -496,7 +508,7 @@ class LayoutEngine:
                 prev_element_tag = child.element.tag_name.lower()
         
         # Update parent box height
-        layout_box.box_metrics.content_height = max(total_height, layout_box.box_metrics.content_height)
+        layout_box.box_metrics.content_height = max(total_height, float(layout_box.box_metrics.content_height) if isinstance(layout_box.box_metrics.content_height, (int, float)) else 0)
 
     def _calculate_element_spacing(self, element: LayoutBox, prev_tag: Optional[str]) -> int:
         """Calculate spacing between elements based on their types."""
@@ -595,6 +607,10 @@ class LayoutEngine:
                     content_width = float(content_width)
                 except (ValueError, TypeError):
                     content_width = container_width - padding_left - padding_right
+        elif isinstance(content_width, (int, float)):
+            content_width = float(content_width)
+        else:
+            content_width = container_width - padding_left - padding_right
         
         # Adjust for content area
         content_x = layout_box.box_metrics.x + margin_left + border_left + padding_left
@@ -625,6 +641,10 @@ class LayoutEngine:
                     child_margin_box_width = float(child_margin_box_width)
                 except (ValueError, TypeError):
                     child_margin_box_width = 0
+            elif isinstance(child_margin_box_width, (int, float)):
+                child_margin_box_width = float(child_margin_box_width)
+            else:
+                child_margin_box_width = 0
             
             # Update position for next child
             x += child_margin_box_width
@@ -637,6 +657,10 @@ class LayoutEngine:
                     child_margin_box_height = float(child_margin_box_height)
                 except (ValueError, TypeError):
                     child_margin_box_height = 0
+            elif isinstance(child_margin_box_height, (int, float)):
+                child_margin_box_height = float(child_margin_box_height)
+            else:
+                child_margin_box_height = 0
             
             line_height = max(line_height, child_margin_box_height)
             
@@ -1138,10 +1162,13 @@ class LayoutEngine:
         
         for child in box.children:
             # Check if we need to wrap to next line
-            if (current_x + child.box_metrics.margin_box_width > box.box_metrics.width):
-                current_x = box.box_metrics.padding_left
-                current_y += line_height
-                line_height = 0
+            try:
+                if (current_x + float(child.box_metrics.margin_box_width) > float(box.box_metrics.width)):
+                    current_x = box.box_metrics.padding_left
+                    current_y += line_height
+                    line_height = 0
+            except:
+                pass
             
             # Layout the child
             child_width, child_height = self._calculate_layout(
@@ -1690,16 +1717,25 @@ class GridLayoutEngine:
         
         # Calculate total fixed size including gaps
         total_fixed_size = sum(fixed_sizes)
-        total_gap_size = gap * (len(tracks) - 1) if len(tracks) > 0 else 0
+        try:
+            total_gap_size = float(gap) * (len(tracks) - 1) if len(tracks) > 0 else 0
+        except:
+            total_gap_size = 0
         
         # Calculate remaining space for fr units and auto tracks
         remaining_space = max(0, container_size - total_fixed_size - total_gap_size)
         
         # Distribute remaining space proportionally among fr units
-        fr_unit_size = remaining_space / total_fr if total_fr > 0 else 0
+        try:
+            fr_unit_size = remaining_space / total_fr if total_fr > 0 else 0
+        except:
+            fr_unit_size = 0
         
         # Assign auto tracks a default size (share remaining space equally)
-        auto_size = remaining_space / auto_count if auto_count > 0 else 0
+        try:
+            auto_size = remaining_space / auto_count if auto_count > 0 else 0
+        except:
+            auto_size = 0
         
         # Calculate final sizes
         final_sizes = []
@@ -1855,7 +1891,10 @@ class FlexboxLayoutEngine:
         
         # Calculate total flex basis and total flex grow units
         total_flex_basis = sum(item['flex_basis'] for item in sorted_items)
-        total_flex_basis += self.gap * (len(sorted_items) - 1) if len(sorted_items) > 0 else 0
+        try:
+            total_flex_basis += float(self.gap) * (len(sorted_items) - 1) if len(sorted_items) > 0 else 0
+        except:
+            total_flex_basis += 0
         
         total_flex_grow = sum(item['flex_grow'] for item in sorted_items)
         
@@ -1870,15 +1909,18 @@ class FlexboxLayoutEngine:
             element = item['element']
             
             # Calculate main axis dimension
-            if free_space > 0 and total_flex_grow > 0:
-                # Distribute extra space according to flex-grow
-                main_axis_dimension = item['flex_basis'] + (free_space * (item['flex_grow'] / total_flex_grow))
-            elif free_space < 0:
-                # Shrink items according to flex-shrink
-                shrink_ratio = item['flex_shrink'] / sum(i['flex_shrink'] for i in sorted_items)
-                main_axis_dimension = item['flex_basis'] + (free_space * shrink_ratio)
-            else:
+            try:
+                if float(free_space) > 0 and float(total_flex_grow) > 0:
+                    # Distribute extra space according to flex-grow
+                    main_axis_dimension = float(item['flex_basis']) + (float(free_space) * (float(item['flex_grow']) / float(total_flex_grow)))
+                elif float(free_space) < 0:
+                    # Shrink items according to flex-shrink
+                    shrink_ratio = item['flex_shrink'] / sum(i['flex_shrink'] for i in sorted_items)
+                    main_axis_dimension = float(item['flex_basis']) + (free_space * shrink_ratio)
+            except:
                 main_axis_dimension = item['flex_basis']
+            
+            
             
             # Calculate cross axis dimension (using align-items or align-self)
             align = item['align_self'] if item['align_self'] != 'auto' else self.align_items
