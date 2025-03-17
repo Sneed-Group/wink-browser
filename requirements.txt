@@ -1,0 +1,32 @@
+# Core dependencies
+requests>=2.28.1
+beautifulsoup4>=4.11.1
+html5lib>=1.1
+cssutils>=2.6.0
+pyppeteer>=1.0.2
+pillow>=9.2.0
+
+# UI dependencies
+tkinter>=8.6  # Usually comes with Python, may need system package
+
+# Optional dependencies for ad blocking
+adblockparser>=0.7
+
+# Development dependencies
+pytest>=7.0.0
+pytest-cov>=3.0.0
+flake8>=5.0.0
+black>=22.6.0
+
+# Additional dependencies
+lxml==4.9.3
+python-ffmpeg==1.0.16
+cssselect==1.2.0
+ruff==0.0.291
+numpy==1.24.3
+cryptography==41.0.3
+urllib3==2.0.4
+pyglet==2.0.9  # For handling media
+pycairo==1.24.0  # For rendering
+PyGObject==3.46.0  # For GUI components
+PyYAML==6.0.1  # For configuration 
