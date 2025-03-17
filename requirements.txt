@@ -7,7 +7,11 @@ pyppeteer>=1.0.2
 pillow>=9.2.0
 
 # UI dependencies
-tkinter>=8.6  # Usually comes with Python, may need system package
+# Note: Tkinter comes with Python installation, not via pip
+# If missing, install via your OS package manager, e.g.:
+# Ubuntu/Debian: sudo apt-get install python3-tk
+# macOS: Install Python from python.org which includes Tkinter
+# Windows: Included with standard Python installation
 
 # Optional dependencies for ad blocking
 adblockparser>=0.7
@@ -19,14 +23,21 @@ flake8>=5.0.0
 black>=22.6.0
 
 # Additional dependencies
-lxml==4.9.3
+# lxml==4.9.3  # Commented out due to compatibility issues with Python 3.13
 python-ffmpeg==1.0.16
 cssselect==1.2.0
 ruff==0.0.291
-numpy==1.24.3
+numpy>=1.26.0  # Updated for Python 3.13 compatibility
 cryptography==41.0.3
-urllib3==2.0.4
+urllib3<1.27,>=1.21.1  # Compatible with requests
 pyglet==2.0.9  # For handling media
-pycairo==1.24.0  # For rendering
-PyGObject==3.46.0  # For GUI components
+
+# System dependencies (require separate installation)
+# On macOS: brew install pkg-config cairo gobject-introspection
+# On Ubuntu/Debian: sudo apt-get install python3-dev pkg-config libcairo2-dev libgirepository1.0-dev
+# pycairo and PyGObject are installed separately after system dependencies
+# pycairo==1.24.0  # For rendering
+# PyGObject==3.46.0  # For GUI components
+
+# Configuration
 PyYAML==6.0.1  # For configuration 
