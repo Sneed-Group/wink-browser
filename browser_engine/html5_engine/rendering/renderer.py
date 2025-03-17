@@ -2612,7 +2612,7 @@ class HTML5Renderer:
         try:
             # Get the element from the layout box
             element = layout_box.element
-            if not element or not hasattr(element, 'tag_name'):
+            if not element:
                 return
                 
             # Get proper position from box metrics
@@ -2624,19 +2624,23 @@ class HTML5Renderer:
             y += layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
                 
             # Skip rendering text content for script and style tags
-            if element.tag_name.lower() in ['script', 'style']:
-                logging.debug(f"Skipping text rendering for {element.tag_name}")
-                return
-                
-            # Skip rendering text content for heading elements (h1-h6) as they have their own rendering method
-            if element.tag_name.lower() in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                logging.debug(f"Skipping text rendering for heading {element.tag_name}")
+            if hasattr(element, 'tag_name') and element.tag_name.lower() in ['script', 'style']:
                 return
                 
             # Get the text content
-            text = element.text_content if hasattr(element, 'text_content') else None
-            if not text or text.strip() == '':
-                logging.debug(f"No text content to render for {element.tag_name}")
+            text = None
+            if hasattr(element, 'text_content'):
+                text = element.text_content
+            elif hasattr(element, 'textContent'):
+                text = element.textContent
+            elif hasattr(element, 'text'):
+                text = element.text
+                
+            # If no direct text content, try to get text from child nodes
+            if not text or not text.strip():
+                text = self._extract_text_content(element)
+            
+            if not text or not text.strip():
                 return
             
             # Use computed style for font settings if available
@@ -2678,40 +2682,35 @@ class HTML5Renderer:
                 color = layout_box.computed_style.get('color', color)
             
             # Get element tag for specific adjustments
-            tag_name = element.tag_name.lower()
+            tag_name = element.tag_name.lower() if hasattr(element, 'tag_name') else ''
             
-            # Add extra vertical spacing for certain elements
-            if tag_name in ['p', 'div']:
-                y += 2  # Small extra spacing for paragraphs and divs
-            elif tag_name in ['a', 'span']:
-                y += 1  # Minimal spacing for inline elements
+            # Calculate available width for text wrapping
+            available_width = layout_box.box_metrics.content_width
+            if available_width <= 0:
+                available_width = None  # Let text flow naturally if no width constraint
             
-            # Limit text length to prevent performance issues with very long text
-            max_text_length = 5000
-            if len(text) > max_text_length:
-                text = text[:max_text_length] + "..."
-            
-            # Create text item on canvas with proper width for wrapping
-            width = layout_box.box_metrics.content_width
-            if width == 'auto' or not isinstance(width, (int, float)) or width <= 0:
-                width = self.viewport_width - 40  # Default width for wrapping
-            else:
-                width = min(width, self.viewport_width - 40)  # Ensure not too wide
-            
+            # Create text with proper wrapping
             text_item = self.canvas.create_text(
                 x, y,
-                text=text,
+                text=text.strip(),
                 font=font_config,
                 fill=color,
-                anchor='nw',  # North-west anchor (top-left)
-                width=width   # Allow wrapping
+                anchor="nw",
+                width=available_width,
+                tags=("text", tag_name)  # Add tags for better management
             )
+            
+            # Store the text item for later reference
             self.canvas_items.append(text_item)
             
-            logging.debug(f"Rendered text content for {element.tag_name}: {text[:20]}...")
+            # Update layout box height based on text dimensions
+            bbox = self.canvas.bbox(text_item)
+            if bbox:
+                text_height = bbox[3] - bbox[1]
+                layout_box.box_metrics.content_height = max(layout_box.box_metrics.content_height, text_height)
             
         except Exception as e:
-            logging.error(f"Error rendering text content: {e}")
+            logger.error(f"Error in text rendering: {e}")
     
     def _render_image_placeholder(self, layout_box, x, y, width, height, element):
         """

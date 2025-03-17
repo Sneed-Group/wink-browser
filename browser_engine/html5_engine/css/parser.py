@@ -163,7 +163,7 @@ class CSSParser:
             /* Default styles for common HTML elements */
             body {
                 margin: 24px;
-                line-height: 1.8;
+                line-height: 1.6;
                 font-family: sans-serif;
                 font-size: 16px;
                 color: #000;
@@ -182,39 +182,106 @@ class CSSParser:
             h1, h2, h3, h4, h5, h6 {
                 display: block;
                 font-weight: bold;
-                margin-top: 2.5em;
-                margin-bottom: 1.5em;
-                line-height: 1.5;
+                margin-top: 1.2em;
+                margin-bottom: 0.8em;
+                line-height: 1.3;
             }
             
             h1 {
                 font-size: 2em;
+                margin-top: 1em;
+                margin-bottom: 0.8em;
             }
             
             h2 {
                 font-size: 1.5em;
+                margin-top: 0.9em;
+                margin-bottom: 0.7em;
             }
             
             h3 {
                 font-size: 1.17em;
+                margin-top: 0.8em;
+                margin-bottom: 0.6em;
             }
             
             h4 {
                 font-size: 1em;
+                margin-top: 0.7em;
+                margin-bottom: 0.5em;
             }
             
             h5 {
                 font-size: 0.83em;
+                margin-top: 0.6em;
+                margin-bottom: 0.4em;
             }
             
             h6 {
                 font-size: 0.67em;
+                margin-top: 0.5em;
+                margin-bottom: 0.3em;
+            }
+            
+            /* Navigation and link styles */
+            nav {
+                display: block;
+                margin-bottom: 1.5em;
+            }
+            
+            nav a {
+                display: block;
+                margin: 0.5em 0;
+                line-height: 1.4;
             }
             
             a:link {
                 color: blue;
                 text-decoration: underline;
                 cursor: pointer;
+                display: inline;
+                padding: 0.1em 0;
+            }
+            
+            /* RFC references */
+            pre {
+                display: block;
+                font-family: monospace;
+                white-space: pre;
+                margin: 1em 0;
+                padding: 0.5em;
+                line-height: 1.4;
+            }
+            
+            /* Text blocks */
+            p {
+                margin-top: 1em;
+                margin-bottom: 1em;
+                line-height: 1.5;
+            }
+            
+            /* Lists */
+            ul, ol {
+                margin: 1em 0;
+                padding-left: 2em;
+            }
+            
+            li {
+                margin: 0.5em 0;
+                line-height: 1.4;
+            }
+            
+            /* Sidebar navigation */
+            .sidebar a, nav a {
+                display: block;
+                margin: 0.8em 0;
+                line-height: 1.4;
+            }
+            
+            /* RFC references */
+            .rfc-ref {
+                display: block;
+                margin: 1em 0;
             }
             
             a:visited {
@@ -234,36 +301,6 @@ class CSSParser:
                 display: inline-block;
                 border: none;
                 margin: 2em 0;
-            }
-            
-            li {
-                display: list-item;
-                margin-left: 40px;
-                margin-top: 1em;
-                margin-bottom: 1em;
-                line-height: 1.7;
-            }
-            
-            ul {
-                display: block;
-                list-style-type: disc;
-                margin-top: 2em;
-                margin-bottom: 2em;
-                padding-left: 40px;
-            }
-            
-            ol {
-                display: block;
-                list-style-type: decimal;
-                margin-top: 2em;
-                margin-bottom: 2em;
-                padding-left: 40px;
-            }
-            
-            p {
-                margin-top: 1.8em;
-                margin-bottom: 1.8em;
-                line-height: 1.8;
             }
             
             table {
@@ -288,11 +325,6 @@ class CSSParser:
                 padding: 10px;
             }
             
-            th {
-                font-weight: bold;
-                text-align: center;
-            }
-            
             input, button, textarea, select {
                 display: inline-block;
                 font-family: inherit;
@@ -313,16 +345,6 @@ class CSSParser:
             button {
                 padding: 10px 20px;
                 background-color: #f0f0f0;
-            }
-            
-            pre {
-                display: block;
-                font-family: monospace;
-                white-space: pre;
-                margin: 2em 0;
-                padding: 1.5em;
-                background-color: #f5f5f5;
-                line-height: 1.6;
             }
             
             code {

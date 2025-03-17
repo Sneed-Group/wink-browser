@@ -292,6 +292,7 @@ class LayoutEngine:
         y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
         
         available_width = layout_box.box_metrics.content_width
+        total_height = 0
         
         prev_element_tag = None
         
@@ -299,41 +300,73 @@ class LayoutEngine:
             # Layout the child
             self._layout_box(child, x, y, available_width)
             
-            # Add additional spacing between elements
-            # Default spacing for all elements
-            extra_spacing = 25  # Increased from 15 to 25
+            # Calculate spacing based on element types
+            spacing = self._calculate_element_spacing(child, prev_element_tag)
             
-            # Get current element tag
-            current_tag = None
+            # Update y position with spacing
+            y += spacing
+            
+            # Update child's y position
+            child.box_metrics.y = y
+            
+            # Move down by child's height
+            y += child.box_metrics.margin_box_height
+            
+            # Update total height
+            total_height = y - layout_box.box_metrics.y
+            
+            # Save current element tag for next iteration
             if hasattr(child.element, 'tag_name'):
-                current_tag = child.element.tag_name.lower()
-                
-            # Add extra spacing for certain elements
-            if current_tag:
-                # Form elements need more space
-                if current_tag in ['input', 'button', 'textarea', 'select']:
-                    extra_spacing = 35  # More space for form elements
-                # Add extra space after paragraphs, headings, and divs
-                elif current_tag in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div']:
-                    extra_spacing = 30
-                # Links and spans often need less space
-                elif current_tag in ['a', 'span']:
-                    extra_spacing = 20
-                    
-                # Ensure extra spacing if previous element was a form element
-                if prev_element_tag in ['input', 'button', 'textarea', 'select']:
-                    extra_spacing = max(extra_spacing, 35)  # Always ensure good spacing after form elements
-                    
-                # Ensure more spacing between two consecutive form elements
-                if current_tag in ['input', 'button', 'textarea', 'select'] and prev_element_tag in ['input', 'button', 'textarea', 'select']:
-                    extra_spacing = 40  # Even more space between consecutive form elements
-                
-                # Save current element tag for next iteration
-                prev_element_tag = current_tag
+                prev_element_tag = child.element.tag_name.lower()
+        
+        # Update parent box height
+        layout_box.box_metrics.content_height = max(total_height, layout_box.box_metrics.content_height)
+
+    def _calculate_element_spacing(self, element: LayoutBox, prev_tag: Optional[str]) -> int:
+        """Calculate spacing between elements based on their types."""
+        if not hasattr(element.element, 'tag_name'):
+            return 10  # Default spacing
             
-            # Move down for next child, including extra spacing
-            y += child.box_metrics.margin_box_height + extra_spacing
-    
+        current_tag = element.element.tag_name.lower()
+        
+        # Base spacing for different element types
+        base_spacing = {
+            'h1': 40,
+            'h2': 35,
+            'h3': 30,
+            'h4': 25,
+            'h5': 20,
+            'h6': 15,
+            'p': 20,
+            'div': 15,
+            'pre': 25,
+            'a': 10,
+            'span': 5
+        }
+        
+        # Get base spacing for current element
+        spacing = base_spacing.get(current_tag, 10)
+        
+        # Adjust spacing based on previous element
+        if prev_tag:
+            # Add extra spacing between text blocks
+            if prev_tag in ['p', 'pre', 'div'] and current_tag in ['p', 'pre', 'div']:
+                spacing += 10
+            
+            # Add extra spacing before headings
+            if current_tag.startswith('h') and len(current_tag) == 2:
+                spacing += 15
+            
+            # Add extra spacing after headings
+            if prev_tag.startswith('h') and len(prev_tag) == 2:
+                spacing += 10
+                
+            # Reduce spacing between inline elements
+            if prev_tag in ['a', 'span'] and current_tag in ['a', 'span']:
+                spacing = 5
+        
+        return spacing
+
     def _layout_inline_children(self, layout_box: LayoutBox, container_width: int) -> None:
         """
         Layout inline children of a box.
