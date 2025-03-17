@@ -301,7 +301,7 @@ class LayoutEngine:
             
             # Add additional spacing between elements
             # Default spacing for all elements
-            extra_spacing = 5  # Base spacing for all elements
+            extra_spacing = 15  # Increased base spacing for all elements (was 10)
             
             if child.element and hasattr(child.element, 'tag_name'):
                 current_tag = child.element.tag_name.lower()
@@ -310,23 +310,31 @@ class LayoutEngine:
                 if prev_element_tag and current_tag:
                     # Increased spacing for better readability
                     if prev_element_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                        extra_spacing = 12  # Increased from 3
+                        extra_spacing = 30  # Increased from 20
                     elif prev_element_tag == 'p' and current_tag == 'p':
-                        extra_spacing = 8   # Increased from 2
+                        extra_spacing = 25   # Increased from 16
                     elif prev_element_tag in ['div', 'section', 'article']:
-                        extra_spacing = 10  # Increased from 1
+                        extra_spacing = 24  # Increased from 18
                     elif prev_element_tag in ['ul', 'ol']:
-                        extra_spacing = 10  # Add spacing after lists
+                        extra_spacing = 28  # Increased from 18
                     elif prev_element_tag == 'li':
-                        extra_spacing = 4   # Spacing between list items
+                        extra_spacing = 12   # Increased from 8
                     elif prev_element_tag in ['table', 'form']:
-                        extra_spacing = 12  # Spacing after tables and forms
+                        extra_spacing = 30  # Increased from 20
                     elif prev_element_tag == 'img':
-                        extra_spacing = 10  # Spacing after images
+                        extra_spacing = 25  # Increased from 18
                 
                 # Add more spacing before headings
                 if current_tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and prev_element_tag:
-                    extra_spacing = max(extra_spacing, 15)  # Ensure headings have good spacing before them
+                    extra_spacing = max(extra_spacing, 35)  # Increased from 25
+                
+                # Add more spacing before and after horizontal rules
+                if current_tag == 'hr' or prev_element_tag == 'hr':
+                    extra_spacing = max(extra_spacing, 32)  # Increased from 22
+                    
+                # Add more spacing around form elements
+                if current_tag in ['input', 'select', 'textarea', 'button'] or prev_element_tag in ['input', 'select', 'textarea', 'button']:
+                    extra_spacing = max(extra_spacing, 25)  # Increased from 15
                 
                 # Save current element tag for next iteration
                 prev_element_tag = current_tag
@@ -531,71 +539,86 @@ class LayoutEngine:
             'border-left-width': '0px',
             'position': 'static',
             'float': 'none',
+            'line-height': '1.5',  # Add default line height for all elements
+            'font-size': '16px',   # Set a reasonable default font size
         }
         
         # Add tag-specific defaults with increased vertical spacing
         if tag_name == 'body':
             defaults.update({
-                'margin-top': '16px',
-                'margin-right': '16px',
-                'margin-bottom': '16px',
-                'margin-left': '16px',
+                'margin-top': '24px',
+                'margin-right': '24px',
+                'margin-bottom': '24px',
+                'margin-left': '24px',
+                'line-height': '1.6',  # Increased line height for better readability
             })
         # Block elements
         elif tag_name == 'div':
             defaults.update({
-                'margin-top': '1.2em',
-                'margin-bottom': '1.2em',
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
             })
         elif tag_name == 'p':
             defaults.update({
-                'margin-top': '1.2em',
-                'margin-bottom': '1.2em',
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
+                'line-height': '1.7',  # More line height for paragraphs
             })
         # Headings with progressively smaller margins as the level increases
         elif tag_name == 'h1':
             defaults.update({
-                'margin-top': '1.8em',
-                'margin-bottom': '1em',
+                'margin-top': '2.5em',
+                'margin-bottom': '1.2em',
+                'line-height': '1.3',  # Headings need less line height
             })
         elif tag_name == 'h2':
             defaults.update({
-                'margin-top': '1.6em',
-                'margin-bottom': '0.9em',
+                'margin-top': '2.2em',
+                'margin-bottom': '1.1em',
+                'line-height': '1.3',
             })
         elif tag_name == 'h3':
             defaults.update({
-                'margin-top': '1.4em',
-                'margin-bottom': '0.8em',
+                'margin-top': '2em',
+                'margin-bottom': '1em',
+                'line-height': '1.3',
             })
         elif tag_name in ('h4', 'h5', 'h6'):
             defaults.update({
-                'margin-top': '1.2em',
-                'margin-bottom': '0.7em',
+                'margin-top': '1.8em',
+                'margin-bottom': '0.9em',
+                'line-height': '1.3',
             })
         # Lists
         elif tag_name in ('ul', 'ol'):
             defaults.update({
-                'margin-top': '1.2em',
-                'margin-bottom': '1.2em',
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
                 'padding-left': '40px',  # Add left padding for list indentation
             })
         elif tag_name == 'li':
             defaults.update({
-                'margin-top': '0.5em',
-                'margin-bottom': '0.5em',
+                'margin-top': '0.8em',
+                'margin-bottom': '0.8em',
+                'line-height': '1.6',  # Better spacing for list items
             })
         # Table elements
         elif tag_name == 'table':
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
+                'margin-top': '2em',
+                'margin-bottom': '2em',
             })
         # Form elements
         elif tag_name == 'form':
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
+                'margin-top': '2em',
+                'margin-bottom': '2em',
+            })
+        elif tag_name in ('input', 'button', 'textarea', 'select'):
+            defaults.update({
+                'margin-top': '0.8em',
+                'margin-bottom': '0.8em',
+                'padding': '6px',  # Add padding to form elements
             })
         # Inline elements
         elif tag_name == 'span':
@@ -605,9 +628,24 @@ class LayoutEngine:
         # Image elements
         elif tag_name == 'img':
             defaults.update({
-                'margin-top': '1em',
-                'margin-bottom': '1em',
+                'margin-top': '1.5em',
+                'margin-bottom': '1.5em',
                 'display': 'inline-block',
+            })
+        # Add spacious margins for other structural elements
+        elif tag_name in ('section', 'article', 'header', 'footer', 'nav', 'aside'):
+            defaults.update({
+                'margin-top': '2em',
+                'margin-bottom': '2em',
+            })
+        # Horizontal rule gets extra margin
+        elif tag_name == 'hr':
+            defaults.update({
+                'margin-top': '2em',
+                'margin-bottom': '2em',
+                'height': '1px',
+                'background-color': '#cccccc',
+                'border': 'none',
             })
         
         return defaults

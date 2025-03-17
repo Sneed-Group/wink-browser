@@ -162,8 +162,8 @@ class CSSParser:
             default_styles = """
             /* Default styles for common HTML elements */
             body {
-                margin: 8px;
-                line-height: 1.2;
+                margin: 24px;
+                line-height: 1.8;
                 font-family: sans-serif;
                 font-size: 16px;
                 color: #000;
@@ -182,8 +182,9 @@ class CSSParser:
             h1, h2, h3, h4, h5, h6 {
                 display: block;
                 font-weight: bold;
-                margin-top: 0.67em;
-                margin-bottom: 0.67em;
+                margin-top: 2.5em;
+                margin-bottom: 1.5em;
+                line-height: 1.5;
             }
             
             h1 {
@@ -232,35 +233,46 @@ class CSSParser:
             img, video, canvas, object {
                 display: inline-block;
                 border: none;
+                margin: 2em 0;
             }
             
             li {
                 display: list-item;
                 margin-left: 40px;
+                margin-top: 1em;
+                margin-bottom: 1em;
+                line-height: 1.7;
             }
             
             ul {
                 display: block;
                 list-style-type: disc;
-                margin-top: 1em;
-                margin-bottom: 1em;
+                margin-top: 2em;
+                margin-bottom: 2em;
                 padding-left: 40px;
             }
             
             ol {
                 display: block;
                 list-style-type: decimal;
-                margin-top: 1em;
-                margin-bottom: 1em;
+                margin-top: 2em;
+                margin-bottom: 2em;
                 padding-left: 40px;
+            }
+            
+            p {
+                margin-top: 1.8em;
+                margin-bottom: 1.8em;
+                line-height: 1.8;
             }
             
             table {
                 display: table;
                 border-collapse: separate;
-                border-spacing: 2px;
+                border-spacing: 8px;
                 border-color: gray;
                 box-sizing: border-box;
+                margin: 2em 0;
             }
             
             tr {
@@ -273,7 +285,7 @@ class CSSParser:
                 display: table-cell;
                 vertical-align: inherit;
                 border: 1px solid #ddd;
-                padding: 2px;
+                padding: 10px;
             }
             
             th {
@@ -285,9 +297,9 @@ class CSSParser:
                 display: inline-block;
                 font-family: inherit;
                 font-size: inherit;
-                padding: 1px;
+                padding: 10px;
                 border: 1px solid #767676;
-                margin: 1px;
+                margin: 1.2em 0;
             }
             
             input[type="text"], input[type="password"], textarea {
@@ -295,11 +307,11 @@ class CSSParser:
             }
             
             input[type="checkbox"], input[type="radio"] {
-                margin: 3px;
+                margin: 5px;
             }
             
             button {
-                padding: 2px 6px;
+                padding: 10px 20px;
                 background-color: #f0f0f0;
             }
             
@@ -307,7 +319,10 @@ class CSSParser:
                 display: block;
                 font-family: monospace;
                 white-space: pre;
-                margin: 1em 0;
+                margin: 2em 0;
+                padding: 1.5em;
+                background-color: #f5f5f5;
+                line-height: 1.6;
             }
             
             code {
@@ -319,8 +334,14 @@ class CSSParser:
             address, blockquote, figcaption, figure, hgroup,
             main, details, summary {
                 display: block;
-                margin: 0;
+                margin: 1.5em 0;
                 padding: 0;
+            }
+            
+            blockquote {
+                margin-left: 2em;
+                padding-left: 1em;
+                border-left: 3px solid #ddd;
             }
             
             /* Inline elements */
@@ -332,10 +353,11 @@ class CSSParser:
             
             hr {
                 display: block;
-                margin-top: 0.5em;
-                margin-bottom: 0.5em;
-                border-style: inset;
+                margin-top: 2em;
+                margin-bottom: 2em;
+                border-style: solid;
                 border-width: 1px;
+                border-color: #ddd;
             }
             """
             
