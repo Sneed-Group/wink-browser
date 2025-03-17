@@ -61,7 +61,21 @@ class BrowserEngine:
         # Initialize parsers and handlers
         self.html_parser = HTMLParser()
         self.css_parser = CSSParser()
-        self.js_engine = JSEngine(enabled=not text_only_mode)
+        
+        # Initialize JavaScript engine with proper parameters
+        # The old code used 'enabled', but the new JSEngine uses different parameters
+        try:
+            self.js_engine = JSEngine(
+                sandbox=True,  # Use sandbox for security
+                timeout=5000,  # 5 seconds timeout
+                enable_modern_js=True,  # Enable modern JavaScript features
+                cache_dir=None  # Use default cache directory
+            ) if not text_only_mode else None
+        except Exception as e:
+            logger.warning(f"Failed to initialize JavaScript engine: {e}. Falling back to text-only mode.")
+            self.js_engine = None
+            self.text_only_mode = True
+        
         self.media_handler = MediaHandler(enabled=not text_only_mode)
         
         # Initialize ad blocker if provided, or create a new one
@@ -253,7 +267,7 @@ class BrowserEngine:
                 self.load_progress = 40
                 self._notify_loading_state()
                 
-                html_content = response.text
+                html_content = response.text_decoded
                 
                 # Cache the content if not in private mode
                 if not self.private_mode:
@@ -314,38 +328,73 @@ class BrowserEngine:
             # Process CSS for each stylesheet
             self.stylesheets = []
             
+            # If in text-only mode, remove style and link[rel=stylesheet] tags from the DOM
+            # to prevent their content from appearing in the plain text output
+            if self.text_only_mode and self.dom:
+                try:
+                    # Remove style tags safely
+                    try:
+                        for style_tag in self.dom.find_all('style'):
+                            try:
+                                style_tag.decompose()
+                            except Exception as tag_error:
+                                logger.warning(f"Error removing style tag: {tag_error}")
+                    except Exception as find_error:
+                        logger.warning(f"Error finding style tags: {find_error}")
+                    
+                    # Remove link tags for stylesheets safely
+                    try:
+                        for link_tag in self.dom.find_all('link', rel='stylesheet'):
+                            try:
+                                link_tag.decompose()
+                            except Exception as tag_error:
+                                logger.warning(f"Error removing stylesheet link tag: {tag_error}")
+                    except Exception as find_error:
+                        logger.warning(f"Error finding stylesheet link tags: {find_error}")
+                    
+                    logger.debug("Removed style and stylesheet link tags in text-only mode")
+                except Exception as e:
+                    logger.error(f"Error processing DOM in text-only mode: {e}")
+                return
+            
             # Extract stylesheets from the DOM
-            style_tags = self.html_parser.get_elements_by_tag(self.dom, "style")
-            for style in style_tags:
-                css_text = style.string
-                if css_text:
-                    self.stylesheets.append(self.css_parser.parse(css_text))
+            try:
+                style_tags = self.html_parser.get_elements_by_tag(self.dom, "style")
+                for style in style_tags:
+                    css_text = style.string
+                    if css_text:
+                        self.stylesheets.append(self.css_parser.parse(css_text))
+            except Exception as e:
+                logger.error(f"Error extracting stylesheets from DOM: {e}")
             
             # Extract external stylesheets
-            link_tags = self.dom.select("link[rel='stylesheet']")
-            for link in link_tags:
-                href = link.get("href")
-                if href:
-                    # Resolve the URL
-                    if not href.startswith("http"):
-                        if self.current_url:
-                            base_url = "/".join(self.current_url.split("/")[:-1])
-                            href = f"{base_url}/{href}"
-                    
-                    # Try to load from cache first
-                    cached_css = self.cache.get(href)
-                    if cached_css:
-                        self.stylesheets.append(self.css_parser.parse(cached_css))
-                    else:
-                        # Load from network
-                        try:
-                            response = self.network.get(href)
-                            if response.status_code == 200:
-                                css_text = response.text
-                                self.cache.set(href, css_text)
-                                self.stylesheets.append(self.css_parser.parse(css_text))
-                        except Exception as e:
-                            logger.error(f"Error loading stylesheet {href}: {e}")
+            try:
+                link_tags = self.dom.select("link[rel='stylesheet']")
+                for link in link_tags:
+                    href = link.get("href")
+                    if href:
+                        # Resolve the URL
+                        if not href.startswith("http"):
+                            if self.current_url:
+                                base_url = "/".join(self.current_url.split("/")[:-1])
+                                href = f"{base_url}/{href}"
+                        
+                        # Try to load from cache first
+                        cached_css = self.cache.get(href)
+                        if cached_css:
+                            self.stylesheets.append(self.css_parser.parse(cached_css))
+                        else:
+                            # Load from network
+                            try:
+                                response = self.network.get(href)
+                                if response.status_code == 200:
+                                    css_text = response.text
+                                    self.cache.set(href, css_text)
+                                    self.stylesheets.append(self.css_parser.parse(css_text))
+                            except Exception as e:
+                                logger.error(f"Error loading stylesheet {href}: {e}")
+            except Exception as e:
+                logger.error(f"Error extracting external stylesheets: {e}")
             
             logger.debug(f"Processed {len(self.stylesheets)} stylesheets")
         except Exception as e:
@@ -375,49 +424,75 @@ class BrowserEngine:
                     img['alt'] = '[Blocked]'  # Set alt text
     
     def _execute_scripts(self) -> None:
-        """Execute JavaScript scripts found in the page."""
-        if not self.js_engine.enabled or self.text_only_mode:
+        """Execute JavaScript code in the DOM."""
+        if self.text_only_mode:
+            logger.debug("Text-only mode, skipping script execution")
             return
-        
-        # Process in a separate thread to avoid blocking the UI
-        threading.Thread(
-            target=self._execute_scripts_thread,
-            daemon=True
-        ).start()
+            
+        # Execute scripts in a background thread
+        thread = threading.Thread(target=self._execute_scripts_thread, daemon=True)
+        thread.start()
     
     def _execute_scripts_thread(self) -> None:
-        """Background thread for executing scripts."""
+        """Execute JavaScript in a background thread."""
         try:
-            # Set the DOM content in the JS engine
-            self.js_engine.set_dom(str(self.dom))
-            
-            # Extract scripts from the DOM
-            script_tags = self.html_parser.get_elements_by_tag(self.dom, "script")
-            for script in script_tags:
-                # Skip if it has a src attribute (external script)
-                if script.get("src"):
-                    continue
+            # Skip if JavaScript engine is not available or in text-only mode
+            if not self.js_engine or self.text_only_mode:
+                logger.debug("JavaScript execution disabled")
+                return
                 
-                # Skip if it has a type that's not JavaScript
-                script_type = script.get("type", "text/javascript")
-                if "javascript" not in script_type.lower():
-                    continue
+            # Get all script elements
+            script_elements = self.dom.find_all('script')
+            
+            # Set the DOM for the JavaScript engine
+            if self.js_engine:
+                # Use the new API to execute JavaScript with DOM
+                try:
+                    result = self.js_engine.execute_js_with_dom(
+                        "/* Initial DOM setup */", 
+                        str(self.dom)
+                    )
+                    
+                    # Check for errors
+                    if result and "error" in result and result["error"]:
+                        logger.error(f"Error setting up DOM for JavaScript: {result['error']}")
+                        return  # Skip script execution if we can't set up the DOM
+                except Exception as e:
+                    logger.error(f"Exception setting up DOM for JavaScript: {e}")
+                    return  # Skip script execution if we can't set up the DOM
+            
+            # Execute each script
+            executed_count = 0
+            for script in script_elements:
+                try:
+                    # Skip external scripts for now
+                    if script.get('src'):
+                        continue
+                        
+                    # Get script content
+                    script_text = script.string
+                    if not script_text:
+                        continue
+                    
+                    # Execute the script
+                    if self.js_engine:
+                        # Use the new API
+                        result = self.js_engine.execute_js(script_text)
+                        
+                        # Check for errors
+                        if result and "error" in result and result["error"]:
+                            logger.warning(f"Error executing script: {result['error']}")
+                            # Continue with other scripts
+                        else:
+                            executed_count += 1
+                except Exception as e:
+                    logger.warning(f"Exception executing script: {e}")
+                    # Continue with other scripts
                 
-                # Execute the script
-                script_text = script.string
-                if script_text:
-                    self.js_engine.execute(script_text)
-            
-            # Trigger dom_ready event for extensions
-            self.extension_manager.trigger_event("dom_ready", {
-                "url": self.current_url,
-                "title": self.page_title,
-                "document": self.dom
-            })
-            
-            logger.debug(f"Executed scripts from the page")
+            logger.debug(f"Executed {executed_count} scripts out of {len(script_elements)} total scripts")
         except Exception as e:
             logger.error(f"Error executing scripts: {e}")
+            # Continue with page loading even if scripts fail
     
     def _handle_blocked_page(self, url: str) -> None:
         """
@@ -549,17 +624,31 @@ class BrowserEngine:
         Set text-only mode.
         
         Args:
-            enabled: Whether text-only mode should be enabled
+            enabled: Whether to enable text-only mode
         """
-        if self.text_only_mode != enabled:
-            self.text_only_mode = enabled
-            self.js_engine.enabled = not enabled
-            self.media_handler.enabled = not enabled
-            logger.info(f"Text-only mode {'enabled' if enabled else 'disabled'}")
+        if self.text_only_mode == enabled:
+            return
             
-            # Reload current page to apply changes
-            if self.current_url:
-                self.refresh()
+        self.text_only_mode = enabled
+        
+        # Update components
+        if self.js_engine and enabled:
+            # If enabling text-only mode, set js_engine to None
+            self.js_engine.close()
+            self.js_engine = None
+        elif not self.js_engine and not enabled:
+            # If disabling text-only mode, create the js_engine
+            self.js_engine = JSEngine(
+                sandbox=True,
+                timeout=5000,
+                enable_modern_js=True
+            )
+            
+        self.media_handler.enabled = not enabled
+        
+        # Reload the current page if any
+        if self.current_url:
+            self.refresh()
     
     def set_private_mode(self, enabled: bool) -> None:
         """
@@ -609,20 +698,64 @@ class BrowserEngine:
         Returns:
             str: Plain text content
         """
-        if self.dom:
-            return self.dom.get_text()
-        return ""
+        if not self.dom:
+            return ""
+        
+        try:    
+            # Create a copy of the DOM to avoid modifying the original
+            try:
+                dom_copy = self.html_parser.parse(str(self.dom))
+            except Exception as e:
+                logger.error(f"Error copying DOM for plain text extraction: {e}")
+                # Fall back to using the original DOM directly
+                dom_copy = self.dom
+            
+            # Remove scripts, styles, and other elements that shouldn't appear in plain text
+            try:
+                for tag_name in ['script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'template']:
+                    try:
+                        for element in dom_copy.find_all(tag_name):
+                            try:
+                                element.decompose()
+                            except Exception as tag_error:
+                                logger.warning(f"Error removing {tag_name} tag: {tag_error}")
+                    except Exception as find_error:
+                        logger.warning(f"Error finding {tag_name} tags: {find_error}")
+            except Exception as e:
+                logger.error(f"Error removing tags from DOM copy: {e}")
+            
+            # Extract text
+            try:
+                text = dom_copy.get_text(separator='\n', strip=True)
+            except Exception as e:
+                logger.error(f"Error extracting text from DOM: {e}")
+                # Fallback to a simpler approach
+                try:
+                    text = "\n".join([elem.text for elem in dom_copy.find_all(text=True) if elem.strip()])
+                except Exception:
+                    logger.error("Failed to extract text with alternate method")
+                    return "Error extracting page content"
+            
+            # Clean up whitespace
+            try:
+                lines = [line.strip() for line in text.split('\n')]
+                lines = [line for line in lines if line]  # Remove empty lines
+                return '\n'.join(lines)
+            except Exception as e:
+                logger.error(f"Error formatting plain text: {e}")
+                return text
+        except Exception as e:
+            logger.error(f"Unexpected error in get_plain_text: {e}")
+            return "Error processing page content"
     
     def clean_up(self) -> None:
-        """Clean up resources before shutdown."""
-        # Trigger browser_exit event for extensions
-        self.extension_manager.trigger_event("browser_exit", {})
-        
+        """Clean up resources used by the browser engine."""
         try:
-            # Close all components
+            # Clean up components
             if self.js_engine:
-                self.js_engine.clean_up()
-            
+                self.js_engine.close()
+                self.js_engine = None
+                
             if self.media_handler:
                 self.media_handler.clean_up()
             
@@ -631,6 +764,9 @@ class BrowserEngine:
             
             if self.network:
                 self.network.close()
+            
+            # Trigger browser_exit event for extensions
+            self.extension_manager.trigger_event("browser_exit", {})
             
             logger.info("Browser engine cleaned up")
         except Exception as e:

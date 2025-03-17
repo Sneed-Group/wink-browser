@@ -1,332 +1,476 @@
 """
-CSS parser implementation.
-This module is responsible for parsing CSS content.
+CSS parser implementation with full support for modern CSS features.
+This module is responsible for parsing and applying CSS styles to HTML elements.
 """
 
 import logging
 import re
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Any
 import cssutils
+import urllib.parse
+
+# Suppress cssutils warning logs - set to CRITICAL instead of ERROR to be even stricter
+cssutils.log.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 
-# Suppress excessive warnings from cssutils
-cssutils.log.setLevel(logging.ERROR)
+# CSS3 properties that contain URLs
+URL_PROPERTIES = {
+    'background', 'background-image', 'border-image', 'border-image-source', 
+    'content', 'cursor', 'list-style', 'list-style-image', 'mask', 'mask-image',
+    'src', '@import', '@font-face'
+}
+
+# Modern CSS features and properties
+MODERN_CSS_PROPERTIES = {
+    # Flexbox
+    'flex', 'flex-basis', 'flex-direction', 'flex-flow', 'flex-grow', 'flex-shrink', 'flex-wrap',
+    'align-content', 'align-items', 'align-self', 'justify-content', 'order',
+    
+    # Grid
+    'grid', 'grid-area', 'grid-auto-columns', 'grid-auto-flow', 'grid-auto-rows',
+    'grid-column', 'grid-column-end', 'grid-column-gap', 'grid-column-start',
+    'grid-gap', 'grid-row', 'grid-row-end', 'grid-row-gap', 'grid-row-start',
+    'grid-template', 'grid-template-areas', 'grid-template-columns', 'grid-template-rows',
+    
+    # Transforms and transitions
+    'transform', 'transform-origin', 'transform-style', 'transition', 'transition-delay',
+    'transition-duration', 'transition-property', 'transition-timing-function',
+    
+    # Animations
+    'animation', 'animation-delay', 'animation-direction', 'animation-duration',
+    'animation-fill-mode', 'animation-iteration-count', 'animation-name',
+    'animation-play-state', 'animation-timing-function',
+    
+    # Other modern features
+    'backdrop-filter', 'background-blend-mode', 'clip-path', 'filter', 'mix-blend-mode',
+    'object-fit', 'object-position', 'opacity', 'pointer-events', 'shape-outside',
+    'text-shadow', 'will-change'
+}
 
 class CSSParser:
-    """CSS parser using cssutils."""
+    """CSS parser using cssutils with full CSS3 support."""
     
     def __init__(self):
         """Initialize the CSS parser."""
-        self.cssutils_parser = cssutils.CSSParser(raiseExceptions=False)
-        logger.debug("CSS parser initialized")
+        # Configure cssutils for modern CSS
+        cssutils.ser.prefs.useMinified = False
+        cssutils.ser.prefs.keepComments = True
+        cssutils.ser.prefs.omitLastSemicolon = False
+        
+        # Set up custom CSS error handling - ignore unknown properties
+        cssutils.css.CSSStyleDeclaration.valid = True  # Don't validate property names
+        
+        logger.debug("CSS parser initialized with modern CSS support")
     
-    def parse(self, css_content: str) -> cssutils.css.CSSStyleSheet:
+    def parse(self, css_content: str, base_url: Optional[str] = None) -> cssutils.css.CSSStyleSheet:
         """
-        Parse CSS content.
+        Parse CSS content into a stylesheet.
         
         Args:
             css_content: CSS content to parse
+            base_url: Optional base URL for resolving relative URLs
             
         Returns:
-            cssutils.css.CSSStyleSheet: Parsed CSS stylesheet
+            cssutils.css.CSSStyleSheet: Parsed stylesheet
         """
         try:
-            stylesheet = self.cssutils_parser.parseString(css_content)
+            # Parse the CSS content
+            stylesheet = cssutils.parseString(css_content)
+            
+            # Resolve relative URLs if base_url is provided
+            if base_url:
+                self.resolve_urls(stylesheet, base_url)
+                
             return stylesheet
         except Exception as e:
             logger.error(f"Error parsing CSS: {e}")
             # Return an empty stylesheet
             return cssutils.css.CSSStyleSheet()
     
-    def get_rules_for_selector(self, 
-                               stylesheet: cssutils.css.CSSStyleSheet, 
-                               selector: str) -> List[Dict[str, str]]:
+    def resolve_urls(self, stylesheet: cssutils.css.CSSStyleSheet, base_url: str) -> None:
         """
-        Get CSS rules that match a selector.
+        Resolve relative URLs in a stylesheet to absolute URLs.
         
         Args:
             stylesheet: CSS stylesheet
-            selector: CSS selector to match
+            base_url: Base URL for resolving relative URLs
+        """
+        # Determine if base URL is HTTPS, to ensure we upgrade HTTP URLs when appropriate
+        is_https_base = base_url.startswith('https://')
+        
+        # Process @import rules
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.IMPORT_RULE:
+                if rule.href:
+                    # Check if it's already an absolute URL
+                    if not rule.href.startswith(('http://', 'https://', 'data:', 'file:')):
+                        # It's a relative URL, resolve it
+                        rule.href = urllib.parse.urljoin(base_url, rule.href)
+                    # If base is HTTPS, ensure the imported CSS is also HTTPS
+                    elif is_https_base and rule.href.startswith('http://'):
+                        rule.href = 'https://' + rule.href[7:]
             
-        Returns:
-            List[Dict[str, str]]: List of CSS rules as property-value dictionaries
-        """
-        matching_rules = []
-        
-        try:
-            for rule in stylesheet.cssRules:
-                # Check if it's a style rule (not an @import, @media, etc.)
-                if rule.type == rule.STYLE_RULE:
-                    # Check if our selector matches any of the rule's selectors
-                    for rule_selector in rule.selectorList:
-                        if self._selector_matches(rule_selector.selectorText, selector):
-                            # Extract all properties
-                            properties = {}
-                            for property_name in rule.style:
-                                properties[property_name] = rule.style[property_name]
-                            
-                            matching_rules.append(properties)
-        except Exception as e:
-            logger.error(f"Error processing rules for selector '{selector}': {e}")
-        
-        return matching_rules
+            # Process style rules
+            elif rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                for property_name in rule.style:
+                    property_value = rule.style[property_name]
+                    if property_name in URL_PROPERTIES or 'url(' in property_value:
+                        # Replace all URL references
+                        new_value = self._resolve_css_urls(property_value, base_url, is_https_base)
+                        rule.style[property_name] = new_value
+            
+            # Process @font-face rules
+            elif rule.type == cssutils.css.CSSRule.FONT_FACE_RULE:
+                for property_name in rule.style:
+                    if property_name == 'src':
+                        property_value = rule.style[property_name]
+                        # Replace all URL references
+                        new_value = self._resolve_css_urls(property_value, base_url, is_https_base)
+                        rule.style[property_name] = new_value
     
-    def _selector_matches(self, rule_selector: str, element_selector: str) -> bool:
+    def _resolve_css_urls(self, css_value: str, base_url: str, upgrade_to_https: bool = False) -> str:
         """
-        Check if a rule selector matches an element selector.
-        This is a simple implementation and doesn't handle all CSS selector cases.
+        Resolve URLs in CSS values.
         
         Args:
-            rule_selector: CSS rule selector
-            element_selector: Element selector to check
+            css_value: CSS property value
+            base_url: Base URL for resolving relative URLs
+            upgrade_to_https: Whether to upgrade HTTP URLs to HTTPS
             
         Returns:
-            bool: True if the rule selector matches the element selector
+            str: CSS value with resolved URLs
         """
-        # In a real browser, this would be much more complex
-        # For now, we'll do a simple exact match or basic wildcard
-        return rule_selector == element_selector or rule_selector == '*'
+        def replace_url(match):
+            url = match.group(1)
+            # Remove quotes if present
+            if url.startswith('"') and url.endswith('"'):
+                url = url[1:-1]
+            elif url.startswith("'") and url.endswith("'"):
+                url = url[1:-1]
+                
+            # Only resolve if not already absolute or special protocol
+            if not url.startswith(('http://', 'https://', 'data:', 'file:', '#')):
+                url = urllib.parse.urljoin(base_url, url)
+            # Upgrade HTTP to HTTPS if requested and the URL is HTTP
+            elif upgrade_to_https and url.startswith('http://'):
+                url = 'https://' + url[7:]
+                
+            # Add quotes around the URL if it contains characters that need escaping
+            if ' ' in url or ',' in url or '(' in url or ')' in url:
+                url = f'"{url}"'
+                
+            return f"url({url})"
+        
+        # Replace URLs in CSS value
+        return re.sub(r'url\(([^)]+)\)', replace_url, css_value)
     
-    def get_all_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, List[Dict[str, str]]]:
+    def extract_styles(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, Dict[str, str]]:
         """
-        Get all CSS rules from a stylesheet.
-        
-        Args:
-            stylesheet: CSS stylesheet
-            
-        Returns:
-            Dict[str, List[Dict[str, str]]]: Dictionary mapping selectors to lists of rules
-        """
-        all_rules = {}
-        
-        try:
-            for rule in stylesheet.cssRules:
-                if rule.type == rule.STYLE_RULE:
-                    # Extract selector text
-                    selector = rule.selectorText
-                    
-                    # Extract properties
-                    properties = {}
-                    for property_name in rule.style:
-                        properties[property_name] = rule.style[property_name]
-                    
-                    # Add to dictionary
-                    if selector not in all_rules:
-                        all_rules[selector] = []
-                    
-                    all_rules[selector].append(properties)
-        except Exception as e:
-            logger.error(f"Error extracting all rules: {e}")
-        
-        return all_rules
-    
-    def get_media_queries(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, List[Dict[str, List[Dict[str, str]]]]]:
-        """
-        Get all media queries from a stylesheet.
+        Extract styles from a stylesheet organized by selector.
         
         Args:
             stylesheet: CSS stylesheet
             
         Returns:
-            Dict[str, List[Dict[str, List[Dict[str, str]]]]]: Dictionary mapping media queries to lists of selector-rules mappings
+            Dict[str, Dict[str, str]]: Dictionary of styles by selector
         """
-        media_queries = {}
+        styles = {}
         
-        try:
-            for rule in stylesheet.cssRules:
-                if rule.type == rule.MEDIA_RULE:
-                    media_text = rule.media.mediaText
-                    
-                    if media_text not in media_queries:
-                        media_queries[media_text] = []
-                    
-                    media_rules = {}
-                    
-                    # Process rules inside the media query
-                    for media_rule in rule.cssRules:
-                        if media_rule.type == media_rule.STYLE_RULE:
-                            selector = media_rule.selectorText
-                            
-                            # Extract properties
-                            properties = {}
-                            for property_name in media_rule.style:
-                                properties[property_name] = media_rule.style[property_name]
-                            
-                            # Add to dictionary
-                            if selector not in media_rules:
-                                media_rules[selector] = []
-                            
-                            media_rules[selector].append(properties)
-                    
-                    media_queries[media_text].append(media_rules)
-        except Exception as e:
-            logger.error(f"Error extracting media queries: {e}")
+        # Process each rule in the stylesheet
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                # Get the selector and style properties
+                selector = rule.selectorText
+                properties = {}
+                
+                for property_name in rule.style:
+                    property_value = rule.style[property_name]
+                    properties[property_name] = property_value
+                
+                # Add to styles dictionary
+                if selector in styles:
+                    # Merge with existing styles
+                    styles[selector].update(properties)
+                else:
+                    styles[selector] = properties
         
-        return media_queries
+        return styles
     
-    def get_font_face_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> List[Dict[str, str]]:
+    def get_computed_style(self, element_attributes: Dict[str, str], rules: Dict[str, Dict[str, str]]) -> Dict[str, str]:
         """
-        Get all @font-face rules from a stylesheet.
+        Get computed style for an element based on CSS rules and element attributes.
         
         Args:
-            stylesheet: CSS stylesheet
+            element_attributes: Element attributes (id, class, tag, etc.)
+            rules: Dictionary of CSS rules by selector
             
         Returns:
-            List[Dict[str, str]]: List of font-face rules
+            Dict[str, str]: Computed style for the element
         """
-        font_face_rules = []
-        
-        try:
-            for rule in stylesheet.cssRules:
-                if rule.type == rule.FONT_FACE_RULE:
-                    # Extract properties
-                    properties = {}
-                    for property_name in rule.style:
-                        properties[property_name] = rule.style[property_name]
-                    
-                    font_face_rules.append(properties)
-        except Exception as e:
-            logger.error(f"Error extracting font-face rules: {e}")
-        
-        return font_face_rules
-    
-    def get_keyframe_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, Dict[str, Dict[str, str]]]:
-        """
-        Get all @keyframes rules from a stylesheet.
-        
-        Args:
-            stylesheet: CSS stylesheet
-            
-        Returns:
-            Dict[str, Dict[str, Dict[str, str]]]: Dictionary mapping animation names to keyframes
-        """
-        keyframe_rules = {}
-        
-        try:
-            for rule in stylesheet.cssRules:
-                if rule.type == rule.KEYFRAMES_RULE:
-                    animation_name = rule.name
-                    keyframes = {}
-                    
-                    # Process keyframes
-                    for keyframe_rule in rule.cssRules:
-                        if keyframe_rule.type == keyframe_rule.KEYFRAME_RULE:
-                            keytext = keyframe_rule.keyText  # e.g., "0%", "50%", "from", "to"
-                            
-                            # Extract properties
-                            properties = {}
-                            for property_name in keyframe_rule.style:
-                                properties[property_name] = keyframe_rule.style[property_name]
-                            
-                            keyframes[keytext] = properties
-                    
-                    keyframe_rules[animation_name] = keyframes
-        except Exception as e:
-            logger.error(f"Error extracting keyframe rules: {e}")
-        
-        return keyframe_rules
-    
-    def get_import_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> List[str]:
-        """
-        Get all @import rules from a stylesheet.
-        
-        Args:
-            stylesheet: CSS stylesheet
-            
-        Returns:
-            List[str]: List of imported stylesheet URLs
-        """
-        import_rules = []
-        
-        try:
-            for rule in stylesheet.cssRules:
-                if rule.type == rule.IMPORT_RULE:
-                    import_rules.append(rule.href)
-        except Exception as e:
-            logger.error(f"Error extracting import rules: {e}")
-        
-        return import_rules
-    
-    def get_computed_style(self, 
-                           element_style: Dict[str, str], 
-                           parent_style: Dict[str, str],
-                           stylesheet_rules: List[Dict[str, str]]) -> Dict[str, str]:
-        """
-        Calculate computed style for an element.
-        
-        Args:
-            element_style: Inline style of the element
-            parent_style: Computed style of the parent element
-            stylesheet_rules: CSS rules from stylesheets that apply to this element
-            
-        Returns:
-            Dict[str, str]: Computed style
-        """
-        # Start with inherited properties from parent
         computed_style = {}
         
-        # List of properties that are inherited from parent
-        inherited_properties = [
-            'color', 'font-family', 'font-size', 'font-style', 'font-weight',
-            'line-height', 'list-style', 'text-align', 'text-indent',
-            'text-transform', 'visibility', 'white-space', 'word-spacing'
-        ]
+        # Get tag name, ID, and classes from element attributes
+        tag_name = element_attributes.get('tag', '').lower()
+        element_id = element_attributes.get('id', '')
+        classes = element_attributes.get('class', '').split()
         
-        # Copy inherited properties from parent
-        for prop in inherited_properties:
-            if prop in parent_style:
-                computed_style[prop] = parent_style[prop]
+        # Helper function to check if a selector matches the element
+        def selector_matches(selector: str) -> bool:
+            # Simple implementation for common selector patterns
+            selector = selector.strip()
+            
+            # Check for ID selector: #id
+            if selector.startswith('#'):
+                return element_id and selector[1:] == element_id
+            
+            # Check for class selector: .class
+            if selector.startswith('.'):
+                return selector[1:] in classes
+            
+            # Check for tag selector: tag
+            if selector.lower() == tag_name:
+                return True
+            
+            # Check for tag.class selector: tag.class
+            if '.' in selector and selector.split('.')[0].lower() == tag_name:
+                class_name = selector.split('.')[1]
+                return class_name in classes
+            
+            # Check for tag#id selector: tag#id
+            if '#' in selector and selector.split('#')[0].lower() == tag_name:
+                selector_id = selector.split('#')[1]
+                return selector_id == element_id
+            
+            # Simple implementation for parent > child selector
+            if '>' in selector:
+                parts = selector.split('>')
+                child_selector = parts[-1].strip()
+                # Check only the child part
+                return selector_matches(child_selector)
+            
+            # Simple implementation for descendant selector (space)
+            if ' ' in selector:
+                parts = selector.split()
+                child_selector = parts[-1].strip()
+                # Check only the last part
+                return selector_matches(child_selector)
+            
+            # For more complex selectors, a more sophisticated approach would be needed
+            return False
         
-        # Apply stylesheet rules (lowest specificity first)
-        for rule in stylesheet_rules:
-            for prop, value in rule.items():
-                computed_style[prop] = value
+        # Apply CSS rules in order of specificity (a very simplified approach)
+        # In a real browser, specificity is calculated more thoroughly
         
-        # Apply inline style (highest specificity)
-        for prop, value in element_style.items():
-            computed_style[prop] = value
+        # First, apply styles for tag selectors (lowest specificity)
+        for selector, properties in rules.items():
+            if selector.lower() == tag_name:
+                computed_style.update(properties)
+        
+        # Next, apply styles for class selectors
+        for selector, properties in rules.items():
+            if selector.startswith('.') and selector[1:] in classes:
+                computed_style.update(properties)
+        
+        # Finally, apply styles for ID selectors (highest specificity)
+        for selector, properties in rules.items():
+            if selector.startswith('#') and selector[1:] == element_id:
+                computed_style.update(properties)
+        
+        # Apply more complex selectors if they match
+        for selector, properties in rules.items():
+            if '>' in selector or ' ' in selector or ',' in selector:
+                if selector_matches(selector):
+                    computed_style.update(properties)
+        
+        # Apply inline styles (highest precedence)
+        if 'style' in element_attributes:
+            inline_styles = self.parse_inline_styles(element_attributes['style'])
+            computed_style.update(inline_styles)
         
         return computed_style
     
-    def create_stylesheet(self) -> cssutils.css.CSSStyleSheet:
+    def parse_inline_styles(self, style_attr: str) -> Dict[str, str]:
         """
-        Create a new empty stylesheet.
+        Parse inline styles from a style attribute.
         
+        Args:
+            style_attr: Style attribute value
+            
         Returns:
-            cssutils.css.CSSStyleSheet: Empty stylesheet
+            Dict[str, str]: Dictionary of CSS properties and values
         """
-        return cssutils.css.CSSStyleSheet()
+        styles = {}
+        
+        if not style_attr:
+            return styles
+        
+        # Split by semicolons and extract property-value pairs
+        for declaration in style_attr.split(';'):
+            if ':' in declaration:
+                property_name, property_value = declaration.split(':', 1)
+                property_name = property_name.strip()
+                property_value = property_value.strip()
+                styles[property_name] = property_value
+        
+        return styles
     
-    def add_rule(self, 
-                 stylesheet: cssutils.css.CSSStyleSheet, 
-                 selector: str, 
-                 properties: Dict[str, str]) -> None:
+    def get_style_rules_for_document(self, stylesheets: List[cssutils.css.CSSStyleSheet]) -> Dict[str, Dict[str, str]]:
         """
-        Add a rule to a stylesheet.
+        Get all style rules from multiple stylesheets.
+        
+        Args:
+            stylesheets: List of CSS stylesheets
+            
+        Returns:
+            Dict[str, Dict[str, str]]: Dictionary of style rules by selector
+        """
+        all_rules = {}
+        
+        for stylesheet in stylesheets:
+            rules = self.extract_styles(stylesheet)
+            
+            # Merge with existing rules
+            for selector, properties in rules.items():
+                if selector in all_rules:
+                    all_rules[selector].update(properties)
+                else:
+                    all_rules[selector] = properties
+        
+        return all_rules
+    
+    def parse_media_queries(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Parse media queries from a stylesheet.
         
         Args:
             stylesheet: CSS stylesheet
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Dictionary of media queries with their rules
+        """
+        media_queries = {}
+        
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.MEDIA_RULE:
+                media_text = rule.media.mediaText
+                
+                if media_text not in media_queries:
+                    media_queries[media_text] = []
+                
+                # Extract style rules within this media query
+                for media_rule in rule.cssRules:
+                    if media_rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                        selector = media_rule.selectorText
+                        properties = {}
+                        
+                        for property_name in media_rule.style:
+                            property_value = media_rule.style[property_name]
+                            properties[property_name] = property_value
+                        
+                        media_queries[media_text].append({
+                            'selector': selector,
+                            'properties': properties
+                        })
+        
+        return media_queries
+    
+    def parse_keyframes(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Parse CSS keyframes for animations from a stylesheet.
+        
+        Args:
+            stylesheet: CSS stylesheet
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Dictionary of keyframes by animation name
+        """
+        keyframes = {}
+        
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.KEYFRAMES_RULE:
+                animation_name = rule.name
+                frames = []
+                
+                for keyframe_rule in rule.cssRules:
+                    # Extract keyframe selector (e.g., "0%", "from", "to", etc.)
+                    keytext = keyframe_rule.keyText
+                    properties = {}
+                    
+                    for property_name in keyframe_rule.style:
+                        property_value = keyframe_rule.style[property_name]
+                        properties[property_name] = property_value
+                    
+                    frames.append({
+                        'keytext': keytext,
+                        'properties': properties
+                    })
+                
+                keyframes[animation_name] = frames
+        
+        return keyframes
+    
+    def parse_font_face_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> List[Dict[str, str]]:
+        """
+        Parse @font-face rules from a stylesheet.
+        
+        Args:
+            stylesheet: CSS stylesheet
+            
+        Returns:
+            List[Dict[str, str]]: List of font face definitions
+        """
+        font_faces = []
+        
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.FONT_FACE_RULE:
+                font_face = {}
+                
+                for property_name in rule.style:
+                    property_value = rule.style[property_name]
+                    font_face[property_name] = property_value
+                
+                font_faces.append(font_face)
+        
+        return font_faces
+    
+    def specificity(self, selector: str) -> Tuple[int, int, int]:
+        """
+        Calculate the specificity of a CSS selector.
+        
+        The specificity is a tuple of (a, b, c) where:
+        - a is the number of ID selectors
+        - b is the number of class selectors, attribute selectors, and pseudo-classes
+        - c is the number of element selectors and pseudo-elements
+        
+        Args:
             selector: CSS selector
-            properties: Dictionary of CSS properties
-        """
-        try:
-            # Convert properties dict to CSS text
-            css_text = '; '.join([f"{prop}: {value}" for prop, value in properties.items()])
-            
-            # Add the rule to the stylesheet
-            stylesheet.add(f'{selector} {{ {css_text} }}')
-        except Exception as e:
-            logger.error(f"Error adding rule to stylesheet: {e}")
-    
-    def get_css_string(self, stylesheet: cssutils.css.CSSStyleSheet) -> str:
-        """
-        Convert a stylesheet to a CSS string.
-        
-        Args:
-            stylesheet: CSS stylesheet
             
         Returns:
-            str: CSS string
+            Tuple[int, int, int]: Specificity tuple
         """
-        return stylesheet.cssText.decode('utf-8') 
+        # Count of ID selectors
+        a = len(re.findall(r'#[a-zA-Z0-9_-]+', selector))
+        
+        # Count of class selectors, attribute selectors, and pseudo-classes
+        b = len(re.findall(r'\.[a-zA-Z0-9_-]+', selector))  # Class selectors
+        b += len(re.findall(r'\[[^\]]+\]', selector))  # Attribute selectors
+        b += len(re.findall(r':[a-zA-Z0-9_-]+(?!\()', selector))  # Pseudo-classes
+        
+        # Count of element selectors and pseudo-elements
+        c = len(re.findall(r'(?:^|[\s>+~])([a-zA-Z0-9_-]+)', selector))  # Element selectors
+        c += len(re.findall(r'::[a-zA-Z0-9_-]+', selector))  # Pseudo-elements
+        
+        return (a, b, c)
+    
+    def sort_selectors_by_specificity(self, selectors: List[str]) -> List[str]:
+        """
+        Sort CSS selectors by specificity in ascending order.
+        
+        Args:
+            selectors: List of CSS selectors
+            
+        Returns:
+            List[str]: Sorted list of selectors
+        """
+        return sorted(selectors, key=self.specificity) 

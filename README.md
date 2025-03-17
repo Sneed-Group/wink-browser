@@ -52,6 +52,28 @@ A modern, privacy-focused web browser built in Python.
    python main.py
    ```
 
+## Usage
+
+Wink Browser supports several command-line options:
+
+- **Regular Mode**: `python main.py [url]`
+- **Text-Only Mode**: `python main.py --text-only [url]` (Disables JavaScript for faster, lighter browsing)
+- **Private Mode**: `python main.py --private [url]` (No history or cookies saved)
+- **Debug Mode**: `python main.py --debug [url]` (Shows detailed debug information)
+
+You can combine these options. For example, to run in both private and text-only mode:
+```
+python main.py --private --text-only https://example.com
+```
+
+### Known Issues and Workarounds
+
+- **SSL Certificate Errors**: If you encounter SSL certificate verification errors, the browser will automatically retry without verification as a fallback. This is not recommended for security-sensitive browsing.
+  
+- **JavaScript Engine Issues**: The JavaScript engine may occasionally encounter event loop errors. If this happens, try using text-only mode (`--text-only` flag) which disables JavaScript execution.
+
+- **Character Encoding**: The browser has been updated to properly handle various character encodings from websites. If you encounter any text rendering issues, please report them with the URL of the affected site.
+
 ## Configuration
 
 Wink Browser stores its configuration in `~/.wink_browser/config.json`. This includes:

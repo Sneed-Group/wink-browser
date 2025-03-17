@@ -5,6 +5,8 @@ html5lib>=1.1
 cssutils>=2.6.0
 pyppeteer>=1.0.2
 pillow>=9.2.0
+websockets>=10.4  # Required for pyppeteer WebSocket communication
+python-magic>=0.4.27  # For content type detection
 
 # UI dependencies
 # Note: Tkinter comes with Python installation, not via pip
@@ -12,6 +14,22 @@ pillow>=9.2.0
 # Ubuntu/Debian: sudo apt-get install python3-tk
 # macOS: Install Python from python.org which includes Tkinter
 # Windows: Included with standard Python installation
+
+# HTML5/CSS/JS Full Support dependencies
+cssselect>=1.2.0  # For advanced CSS selectors
+soupsieve>=2.4.1  # Advanced CSS selector implementation for BeautifulSoup
+pyquery>=2.0.0  # jQuery-like selectors and manipulation
+tinycss2>=1.2.1  # CSS parsing and manipulation
+regex>=2023.6.3  # Advanced regular expressions for parsing
+appdirs>=1.4.4  # For finding user data directories
+webencodings>=0.5.1  # For handling encodings in HTML
+lxml>=4.9.3  # For fast XML/HTML processing with XPath
+jsonschema>=4.17.3  # For JSON validation (used in modern JS)
+
+# Media handling dependencies
+python-ffmpeg==1.0.16  # For audio/video processing
+pyglet>=2.0.9  # For multimedia handling
+imageio>=2.31.1  # For image format support
 
 # Optional dependencies for ad blocking
 adblockparser>=0.7
@@ -23,14 +41,10 @@ flake8>=5.0.0
 black>=22.6.0
 
 # Additional dependencies
-# lxml==4.9.3  # Commented out due to compatibility issues with Python 3.13
-python-ffmpeg==1.0.16
-cssselect==1.2.0
-ruff==0.0.291
 numpy>=1.26.0  # Updated for Python 3.13 compatibility
-cryptography==41.0.3
+cryptography>=41.0.3  # For secure content
 urllib3<1.27,>=1.21.1  # Compatible with requests
-pyglet==2.0.9  # For handling media
+typing_extensions>=4.7.1  # For enhanced type hints
 
 # System dependencies (require separate installation)
 # On macOS: brew install pkg-config cairo gobject-introspection
@@ -40,4 +54,4 @@ pyglet==2.0.9  # For handling media
 # PyGObject==3.46.0  # For GUI components
 
 # Configuration
-PyYAML==6.0.1  # For configuration 
+PyYAML>=6.0.1  # For configuration 

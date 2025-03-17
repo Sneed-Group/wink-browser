@@ -26,6 +26,9 @@ def parse_arguments():
     parser.add_argument("--debug", action="store_true", 
                         help="Enable debug mode")
     
+    parser.add_argument("--text-only", "--text", action="store_true", 
+                        help="Start in text-only mode (no JavaScript or media)")
+    
     parser.add_argument("--config", type=str, default=None,
                         help="Path to custom config file")
     
@@ -77,7 +80,7 @@ def main():
         
         # Initialize browser engine
         engine = BrowserEngine(
-            text_only_mode=False,
+            text_only_mode=args.text_only,
             private_mode=args.private,
             ad_blocker=ad_blocker
         )

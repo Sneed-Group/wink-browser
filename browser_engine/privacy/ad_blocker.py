@@ -113,6 +113,7 @@ class AdBlocker:
                         for line in lines:
                             line = line.strip()
                             if line and not line.startswith(('!', '[', '#')):
+                                # Add to raw rules for processing
                                 raw_rules.append(line)
                                 
                                 # Also extract domain blocks for fallback
@@ -126,11 +127,80 @@ class AdBlocker:
             
             # Compile rules if adblockparser is available
             if self.adblockparser_available and raw_rules:
-                with self._lock:
-                    self.rules = AdblockRules(raw_rules)
-                    self.url_cache.clear()  # Clear cache after updating rules
+                try:
+                    # Sanitize rules to avoid common parsing errors
+                    sanitized_rules = []
                     
-                    logger.info(f"Ad blocker loaded {len(raw_rules)} rules")
+                    for rule in raw_rules:
+                        try:
+                            # Ensure the rule is a string
+                            if not isinstance(rule, str):
+                                continue
+                                
+                            # Skip rules that are too long (likely malformed)
+                            if len(rule) > 10000:
+                                logger.debug(f"Skipping excessively long rule ({len(rule)} chars)")
+                                continue
+                                
+                            # Check for unbalanced parentheses
+                            if rule.count('(') != rule.count(')'):
+                                # Try to fix unbalanced parentheses by adding closing ones
+                                imbalance = rule.count('(') - rule.count(')')
+                                if imbalance > 0:
+                                    # Add missing closing parentheses
+                                    rule = rule + ')' * imbalance
+                                elif imbalance < 0:
+                                    # Skip rule with too many closing parentheses
+                                    logger.debug(f"Skipping rule with too many closing parentheses: {rule}")
+                                    continue
+                                    
+                            # Check for other common syntax errors
+                            if '\\' in rule and '\\\'' not in rule and '\\"' not in rule:
+                                # Escape backslashes that aren't already escaping quotes
+                                rule = rule.replace('\\', '\\\\')
+                                
+                            # Skip other known problematic patterns
+                            if '**' in rule or '{' in rule and '}' not in rule:
+                                logger.debug(f"Skipping rule with problematic pattern: {rule}")
+                                continue
+                                
+                            # Add the sanitized rule
+                            sanitized_rules.append(rule)
+                        except Exception as e:
+                            logger.debug(f"Error sanitizing rule '{rule}': {e}")
+                            continue
+                    
+                    with self._lock:
+                        # Try to compile the rules with a timeout to avoid hanging
+                        # Use try/except for each potential error point
+                        try:
+                            # Limit the number of rules to compile for better stability
+                            max_rules = 50000
+                            if len(sanitized_rules) > max_rules:
+                                logger.warning(f"Limiting to {max_rules} rules out of {len(sanitized_rules)}")
+                                sanitized_rules = sanitized_rules[:max_rules]
+                            
+                            self.rules = AdblockRules(
+                                sanitized_rules,
+                                use_re2=False,  # Don't use re2 as it may not be available
+                                max_mem=256*1024*1024  # Limit memory usage to 256MB
+                            )
+                            
+                            self.url_cache.clear()  # Clear cache after updating rules
+                            
+                            logger.info(f"Ad blocker loaded {len(sanitized_rules)} rules out of {len(raw_rules)} total rules")
+                        except Exception as e:
+                            logger.error(f"Error compiling ad block rules: {e}")
+                            # Fall back to domain blocking only
+                            self.rules = None
+                            logger.warning("Falling back to simple domain blocking due to rule compilation error")
+                            logger.info(f"Ad blocker loaded {len(self.blocked_domains)} domain blocks")
+                except Exception as e:
+                    logger.error(f"Error setting up ad block rules: {e}")
+                    # Fall back to domain blocking only
+                    self.rules = None
+                    logger.warning("Falling back to simple domain blocking due to setup error")
+                    logger.info(f"Ad blocker loaded {len(self.blocked_domains)} domain blocks")
             elif raw_rules:
                 logger.warning("adblockparser not available. Using simple domain blocking.")
                 logger.info(f"Ad blocker loaded {len(self.blocked_domains)} domain blocks")

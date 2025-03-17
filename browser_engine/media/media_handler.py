@@ -51,6 +51,12 @@ class MediaHandler:
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_dir = cache_dir
         
+        # Keep track of active threads
+        self.active_threads: List[threading.Thread] = []
+        
+        # Cache of loaded images
+        self.image_cache: Dict[str, Any] = {}
+        
         # Dictionary to store loaded media
         self.loaded_media = {}
         
@@ -58,80 +64,109 @@ class MediaHandler:
         self.ongoing_downloads = {}
         self._lock = threading.Lock()
         
-        logger.debug(f"Media handler initialized (enabled: {enabled}, cache_dir: {cache_dir})")
+        logger.debug(f"Media handler initialized (enabled={enabled}, cache_dir={cache_dir})")
     
     def load_image(self, url: str, callback: Any = None) -> Optional[Tuple[str, Any]]:
         """
         Load an image from a URL.
         
         Args:
-            url: URL or path to the image
+            url: URL of the image
             callback: Optional callback function to call when image is loaded
             
         Returns:
-            Optional[Tuple[str, Any]]: Tuple of (cache_path, image_data) or None if loading failed
+            Optional[Tuple[str, Any]]: Tuple of (cache_path, image_object) or None if loading failed
         """
         if not self.enabled:
-            logger.warning("Media handler is disabled")
+            logger.debug(f"Media handling disabled, not loading image from {url}")
             return None
-        
+            
         # Check if image is already loaded
         if url in self.loaded_media:
             if callback:
                 callback(url, self.loaded_media[url])
             return (url, self.loaded_media[url])
         
-        # Start a background thread to load the image
+        # Check if image is already in cache
+        cache_key = self._get_cache_key(url)
+        cache_path = os.path.join(self.cache_dir, cache_key)
+        
+        if cache_key in self.image_cache:
+            logger.debug(f"Image {url} found in memory cache")
+            if callback:
+                callback(url, self.image_cache[cache_key])
+            return (cache_path, self.image_cache[cache_key])
+            
+        if os.path.exists(cache_path):
+            logger.debug(f"Image {url} found in disk cache at {cache_path}")
+            try:
+                # Load image from disk cache
+                image = Image.open(cache_path)
+                self.image_cache[cache_key] = image
+                if callback:
+                    callback(url, image)
+                return (cache_path, image)
+            except Exception as e:
+                logger.warning(f"Failed to load image from cache: {e}")
+                # Fall through to download the image again
+        
+        # Start a thread to download and process the image
         thread = threading.Thread(
             target=self._load_image_thread,
             args=(url, callback),
             daemon=True
         )
         thread.start()
+        self.active_threads.append(thread)
         
+        # Return None immediately, callback will be called when image is loaded
         return None
     
     def _load_image_thread(self, url: str, callback: Any) -> None:
         """
-        Background thread for loading an image.
+        Thread function to load an image from a URL.
         
         Args:
-            url: URL or path to the image
-            callback: Optional callback function to call when image is loaded
+            url: URL of the image
+            callback: Callback function to call when image is loaded
         """
         try:
-            # Check if this is a local file path or a URL
-            if url.startswith(('http://', 'https://')):
-                # Download the image
-                cache_path = self._download_file(url)
-                if not cache_path:
-                    logger.error(f"Failed to download image: {url}")
-                    return
-            else:
-                # Local file path
-                if os.path.exists(url):
-                    cache_path = url
-                else:
-                    logger.error(f"Image file not found: {url}")
-                    return
+            logger.debug(f"Loading image from {url}")
             
+            # Download the image
+            cache_path = self._download_file(url)
+            if not cache_path:
+                logger.warning(f"Failed to download image from {url}")
+                if callback:
+                    callback(url, None)
+                return
+                
             # Load the image using PIL
             try:
-                with Image.open(cache_path) as img:
-                    # Convert to a format that can be used by the UI
-                    image_data = img.copy()
+                image = Image.open(cache_path)
+                
+                # Store in memory cache
+                cache_key = self._get_cache_key(url)
+                self.image_cache[cache_key] = image
+                
+                # Call the callback with the loaded image
+                if callback:
+                    callback(url, image)
                     
-                    # Store in loaded media dictionary
-                    with self._lock:
-                        self.loaded_media[url] = image_data
-                    
-                    # Call the callback if provided
-                    if callback:
-                        callback(url, image_data)
+                logger.debug(f"Successfully loaded image from {url}")
             except Exception as e:
-                logger.error(f"Error loading image {url}: {e}")
+                logger.warning(f"Failed to process image from {url}: {e}")
+                if callback:
+                    callback(url, None)
         except Exception as e:
             logger.error(f"Error in image loading thread for {url}: {e}")
+            if callback:
+                callback(url, None)
+        finally:
+            # Remove this thread from active threads
+            for thread in self.active_threads[:]:
+                if not thread.is_alive():
+                    self.active_threads.remove(thread)
     
     def load_video(self, url: str, callback: Any = None) -> Optional[str]:
         """
@@ -282,84 +317,120 @@ class MediaHandler:
         Download a file from a URL and cache it.
         
         Args:
-            url: URL to download
+            url: URL of the file to download
             
         Returns:
             Optional[str]: Path to the cached file or None if download failed
         """
+        if not self.enabled:
+            return None
+            
         try:
-            # Check if download is already in progress
-            with self._lock:
-                if url in self.ongoing_downloads:
-                    # Wait for the download to complete
-                    while url in self.ongoing_downloads:
-                        self._lock.release()
-                        time.sleep(0.1)
-                        self._lock.acquire()
-                    
-                    # If the download was successful, return the cached path
-                    if url in self.loaded_media:
-                        return self.loaded_media[url]
-                    else:
-                        return None
-                
-                # Mark this URL as being downloaded
-                self.ongoing_downloads[url] = True
+            # Create a cache key based on the URL
+            cache_key = self._get_cache_key(url)
+            cache_path = os.path.join(self.cache_dir, cache_key)
             
-            # Generate a cache file path based on the URL
-            url_hash = hashlib.md5(url.encode()).hexdigest()
-            parsed_url = urllib.parse.urlparse(url)
-            path = parsed_url.path
-            filename = os.path.basename(path)
-            
-            if not filename:
-                # If the URL doesn't have a filename, use the hash
-                filename = url_hash
-            else:
-                # If the URL has a filename, prefix it with the hash to avoid collisions
-                name, ext = os.path.splitext(filename)
-                filename = f"{url_hash}{ext}"
-            
-            cache_path = os.path.join(self.cache_dir, filename)
-            
-            # Check if the file already exists in the cache
+            # Check if the file already exists in cache
             if os.path.exists(cache_path):
-                # Remove from ongoing downloads
-                with self._lock:
-                    if url in self.ongoing_downloads:
-                        del self.ongoing_downloads[url]
-                
-                logger.debug(f"Using cached file for {url}: {cache_path}")
+                logger.debug(f"File {url} found in cache at {cache_path}")
                 return cache_path
+                
+            # Parse the URL
+            parsed_url = urllib.parse.urlparse(url)
+            
+            # Handle data URLs (e.g., data:image/png;base64,...)
+            if parsed_url.scheme == 'data':
+                return self._handle_data_url(url, cache_path)
+                
+            # Handle file URLs
+            if parsed_url.scheme == 'file':
+                file_path = urllib.request.url2pathname(parsed_url.path)
+                if os.path.exists(file_path):
+                    # Copy the file to the cache
+                    shutil.copy2(file_path, cache_path)
+                    return cache_path
+                else:
+                    logger.warning(f"File {file_path} not found")
+                    return None
             
             # Download the file
-            logger.debug(f"Downloading {url} to {cache_path}")
+            logger.debug(f"Downloading file from {url}")
             
-            headers = {
-                'User-Agent': 'WinkBrowser/0.1',
-            }
+            # Create a request with a user agent
+            request = urllib.request.Request(
+                url,
+                headers={
+                    'User-Agent': 'Wink-Browser/1.0 (Python)'
+                }
+            )
             
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req) as response:
-                with open(cache_path, 'wb') as out_file:
-                    shutil.copyfileobj(response, out_file)
-            
-            # Remove from ongoing downloads
-            with self._lock:
-                if url in self.ongoing_downloads:
-                    del self.ongoing_downloads[url]
-            
-            logger.debug(f"Downloaded {url} to {cache_path}")
-            return cache_path
+            # Download with timeout
+            with urllib.request.urlopen(request, timeout=10) as response:
+                # Check if the response is valid
+                if response.status != 200:
+                    logger.warning(f"Failed to download {url}: HTTP {response.status}")
+                    return None
+                    
+                # Read the response data
+                data = response.read()
+                
+                # Save to cache file
+                with open(cache_path, 'wb') as f:
+                    f.write(data)
+                
+                logger.debug(f"Downloaded {url} to {cache_path}")
+                return cache_path
+                
         except Exception as e:
             logger.error(f"Error downloading {url}: {e}")
-            
-            # Remove from ongoing downloads
-            with self._lock:
-                if url in self.ongoing_downloads:
-                    del self.ongoing_downloads[url]
-            
             return None
+    
+    def _handle_data_url(self, url: str, cache_path: str) -> Optional[str]:
+        """
+        Handle a data URL (e.g., data:image/png;base64,...).
+        
+        Args:
+            url: Data URL
+            cache_path: Path to save the decoded data
+            
+        Returns:
+            Optional[str]: Path to the cached file or None if decoding failed
+        """
+        try:
+            # Parse the data URL
+            header, encoded = url.split(',', 1)
+            is_base64 = ';base64' in header
+            
+            # Decode the data
+            if is_base64:
+                import base64
+                data = base64.b64decode(encoded)
+            else:
+                data = urllib.parse.unquote_to_bytes(encoded)
+                
+            # Save to cache file
+            with open(cache_path, 'wb') as f:
+                f.write(data)
+                
+            logger.debug(f"Decoded data URL to {cache_path}")
+            return cache_path
+            
+        except Exception as e:
+            logger.error(f"Error decoding data URL: {e}")
+            return None
+            
+    def _get_cache_key(self, url: str) -> str:
+        """
+        Create a cache key for a URL.
+        
+        Args:
+            url: URL to create a cache key for
+            
+        Returns:
+            str: Cache key
+        """
+        # Create a hash of the URL to use as a filename
+        return hashlib.md5(url.encode()).hexdigest()
     
     def _get_video_info(self, video_path: str) -> Dict[str, Any]:
         """

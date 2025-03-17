@@ -153,6 +153,32 @@ class Cache:
             size = len(content_bytes)
             expires = int(time.time()) + (expiry if expiry is not None else self.default_expiry)
             
+            # Determine content type and encoding
+            content_type = "text/html"
+            encoding = "utf-8"
+            
+            if isinstance(content, str):
+                content_type = "text/html; charset=utf-8"
+            else:
+                # Try to detect content type for binary data
+                try:
+                    import magic
+                    content_type = magic.from_buffer(content_bytes[:1024], mime=True)
+                except ImportError:
+                    # If python-magic is not available, make a simple guess based on content
+                    if content_bytes.startswith(b'<!DOCTYPE html') or content_bytes.startswith(b'<html'):
+                        content_type = "text/html"
+                    elif content_bytes.startswith(b'\xff\xd8\xff'):
+                        content_type = "image/jpeg"
+                    elif content_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+                        content_type = "image/png"
+                    elif content_bytes.startswith(b'GIF8'):
+                        content_type = "image/gif"
+                    elif content_bytes.startswith(b'%PDF'):
+                        content_type = "application/pdf"
+                    else:
+                        content_type = "application/octet-stream"
+            
             # Update or add entry in metadata
             if key in self.metadata["entries"]:
                 old_size = self.metadata["entries"][key]["size"]
@@ -163,7 +189,8 @@ class Cache:
                 "created": int(time.time()),
                 "expires": expires,
                 "size": size,
-                "type": "text/html" if isinstance(content, str) else "application/octet-stream"
+                "type": content_type,
+                "encoding": encoding if isinstance(content, str) else None
             }
             
             self.metadata["total_size"] += size
@@ -219,9 +246,15 @@ class Cache:
             with open(cache_path, 'rb') as f:
                 content = f.read()
             
-            # Convert to string if it's text/html
-            if entry["type"] == "text/html":
-                return content.decode('utf-8')
+            # Convert to string if it's text content
+            if "text/" in entry.get("type", "") or "html" in entry.get("type", "") or "xml" in entry.get("type", ""):
+                encoding = entry.get("encoding", "utf-8") or "utf-8"
+                try:
+                    return content.decode(encoding, errors='replace')
+                except UnicodeDecodeError:
+                    # If the specified encoding fails, try UTF-8
+                    logger.warning(f"Error decoding cache content with {encoding}. Falling back to UTF-8.")
+                    return content.decode('utf-8', errors='replace')
             
             return content
             

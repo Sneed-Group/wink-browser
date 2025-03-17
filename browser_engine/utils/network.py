@@ -14,23 +14,110 @@ import http.cookiejar
 import ssl
 import socket
 import json
+import re
 
 import requests
 from requests.adapters import HTTPAdapter
+
+# Try to import urllib3 utilities, but handle if not available
+try:
+    from urllib3.util import ssl_ as urllib3_ssl
+    URLLIB3_SSL_AVAILABLE = True
+except ImportError:
+    URLLIB3_SSL_AVAILABLE = False
+    logging.warning("urllib3.util.ssl_ not available. Using standard SSL functionality.")
+
 from requests.exceptions import RequestException
 
 logger = logging.getLogger(__name__)
+
+class SSLAdapter(HTTPAdapter):
+    """Custom HTTPS adapter with modern SSL configuration."""
+    
+    def __init__(self, **kwargs):
+        self.ssl_context = None
+        
+        # Only try to use urllib3 SSL utilities if available
+        if URLLIB3_SSL_AVAILABLE:
+            # Use a safer, more compatible SSL context configuration
+            try:
+                # Try to create an ideal secure context
+                self.ssl_context = urllib3_ssl.create_urllib3_context(
+                    ssl_version=ssl.PROTOCOL_TLS,
+                    cert_reqs=ssl.CERT_REQUIRED,
+                    options=ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3 | ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
+                )
+                
+                # Try to load the default certificates from the system
+                try:
+                    import certifi
+                    self.ssl_context.load_verify_locations(cafile=certifi.where())
+                    logger.debug("Loaded certificates from certifi")
+                except ImportError:
+                    logger.warning("certifi package not available, trying to use system certificates")
+                    try:
+                        # Try to use the system's certificate store
+                        self.ssl_context.load_default_certs(purpose=ssl.Purpose.SERVER_AUTH)
+                        logger.debug("Loaded system certificates")
+                    except Exception as cert_error:
+                        logger.warning(f"Could not load system certificates: {cert_error}")
+                        # Try common certificate file locations
+                        cert_paths = [
+                            "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu/Gentoo etc.
+                            "/etc/pki/tls/certs/ca-bundle.crt",    # Fedora/RHEL 6
+                            "/etc/ssl/ca-bundle.pem",              # OpenSUSE
+                            "/etc/pki/tls/cacert.pem",             # OpenELEC
+                            "/etc/ssl/cert.pem",                   # macOS, FreeBSD
+                        ]
+                        for cert_path in cert_paths:
+                            if os.path.exists(cert_path):
+                                try:
+                                    self.ssl_context.load_verify_locations(cafile=cert_path)
+                                    logger.debug(f"Loaded certificates from {cert_path}")
+                                    break
+                                except Exception:
+                                    continue
+            except (AttributeError, ValueError, TypeError) as e:
+                logger.warning(f"Could not create custom SSL context with ideal settings: {e}")
+                # Fall back to a more compatible context
+                try:
+                    self.ssl_context = urllib3_ssl.create_urllib3_context()
+                    # Try to load default certificates
+                    try:
+                        self.ssl_context.load_default_certs(purpose=ssl.Purpose.SERVER_AUTH)
+                    except Exception as cert_error:
+                        logger.warning(f"Could not load default certificates: {cert_error}")
+                except Exception as e2:
+                    logger.warning(f"Could not create default SSL context either: {e2}")
+                    # Don't set ssl_context at all, will use default
+                    self.ssl_context = None
+        else:
+            logger.warning("SSL customization not available (urllib3.util.ssl_ missing)")
+                
+        super().__init__(**kwargs)
+    
+    def init_poolmanager(self, *args, **kwargs):
+        # Only set custom ssl_context if we successfully created one
+        if self.ssl_context:
+            kwargs['ssl_context'] = self.ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+    
+    def proxy_manager_for(self, *args, **kwargs):
+        # Only set custom ssl_context if we successfully created one
+        if self.ssl_context:
+            kwargs['ssl_context'] = self.ssl_context
+        return super().proxy_manager_for(*args, **kwargs)
 
 class NetworkManager:
     """Network manager for making HTTP requests."""
     
     # Default user agents
     USER_AGENTS = {
-        "default": "WinkBrowser/0.1",
-        "chrome": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
-        "android": "Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
-        "iphone": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
+        "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Wink/0.1",
+        "chrome": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+        "firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0",
+        "android": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.104 Mobile Safari/537.36",
+        "iphone": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
     }
     
     def __init__(self, private_mode: bool = False, timeout: int = 30, max_retries: int = 3):
@@ -52,10 +139,13 @@ class NetworkManager:
         # Configure session
         self._configure_session()
         
-        # Add retry adapter
-        retry_adapter = HTTPAdapter(max_retries=max_retries)
-        self.session.mount('http://', retry_adapter)
-        self.session.mount('https://', retry_adapter)
+        # Add retry adapter with proper SSL configuration
+        # Create custom HTTPS adapter with modern SSL configuration
+        https_adapter = SSLAdapter(max_retries=max_retries)
+        http_adapter = HTTPAdapter(max_retries=max_retries)
+        
+        self.session.mount('http://', http_adapter)
+        self.session.mount('https://', https_adapter)
         
         # Lock for thread safety
         self._lock = threading.Lock()
@@ -79,6 +169,22 @@ class NetworkManager:
             'Sec-Fetch-User': '?1',
             'Cache-Control': 'max-age=0',
         })
+        
+        # Configure SSL verification
+        self.session.verify = True  # Enable SSL certificate verification
+        
+        # Try to use certifi for certificate verification if available
+        try:
+            import certifi
+            self.session.verify = certifi.where()
+            logger.debug(f"Using certifi for certificate verification: {certifi.where()}")
+        except ImportError:
+            # If certifi is not available, try to find system certificates
+            logger.warning("certifi package not available, using system certificates")
+            # On macOS, the default location is /etc/ssl/cert.pem
+            if os.path.exists("/etc/ssl/cert.pem"):
+                self.session.verify = "/etc/ssl/cert.pem"
+                logger.debug("Using macOS system certificates")
         
         # Clear cookies in private mode
         if self.private_mode:
@@ -137,6 +243,73 @@ class NetworkManager:
             self.timeout = timeout
             logger.debug(f"Timeout set to: {timeout}")
     
+    def get_decoded_text(self, response: requests.Response) -> str:
+        """
+        Get properly decoded text from a response by respecting the content encoding.
+        
+        Args:
+            response: The response object
+            
+        Returns:
+            str: Properly decoded text content
+        """
+        try:
+            # First, try to get the encoding from the Content-Type header
+            content_type = response.headers.get('Content-Type', '')
+            charset = None
+            
+            # Extract charset from Content-Type
+            if 'charset=' in content_type.lower():
+                charset = content_type.lower().split('charset=')[-1].split(';')[0].strip()
+            
+            # If we don't have a charset from headers, try to detect from content
+            if not charset:
+                # First few bytes for detection
+                content_bytes = response.content
+                
+                # Try to detect encoding from content
+                # Check for UTF-8 BOM
+                if content_bytes.startswith(b'\xef\xbb\xbf'):
+                    charset = 'utf-8-sig'
+                # Check for UTF-16LE BOM
+                elif content_bytes.startswith(b'\xff\xfe'):
+                    charset = 'utf-16le'
+                # Check for UTF-16BE BOM
+                elif content_bytes.startswith(b'\xfe\xff'):
+                    charset = 'utf-16be'
+                # Check for HTML meta charset
+                else:
+                    # Look for meta charset in the first 1024 bytes
+                    # This is a simple approach, a real browser would do more sophisticated detection
+                    html_start = content_bytes[:1024].decode('ascii', errors='ignore')
+                    meta_charset_match = re.search(r'<meta[^>]*charset=["\']?([^"\'>]+)', html_start, re.IGNORECASE)
+                    
+                    if meta_charset_match:
+                        charset = meta_charset_match.group(1).strip()
+            
+            # If we still don't have a charset, use the response.apparent_encoding
+            if not charset:
+                charset = response.apparent_encoding or 'utf-8'
+            
+            logger.debug(f"Using charset: {charset} for response from {response.url}")
+            
+            # Decode the content with the determined charset
+            if charset:
+                try:
+                    return response.content.decode(charset, errors='replace')
+                except (LookupError, UnicodeDecodeError) as e:
+                    logger.warning(f"Error decoding with {charset}: {e}. Falling back to apparent_encoding.")
+                    # Fall back to apparent_encoding if the specified charset fails
+                    return response.content.decode(response.apparent_encoding or 'utf-8', errors='replace')
+            
+            # If all else fails, use response.text (which uses response.encoding)
+            return response.text
+            
+        except Exception as e:
+            logger.error(f"Error decoding response: {e}")
+            # Last resort fallback
+            return response.text
+
     def get(self, url: str, headers: Optional[Dict[str, str]] = None, 
              params: Optional[Dict[str, str]] = None) -> requests.Response:
         """
@@ -163,7 +336,38 @@ class NetworkManager:
                 )
             
             response.raise_for_status()
+            
+            # Add a text_decoded property to the response with properly decoded text
+            response.text_decoded = self.get_decoded_text(response)
+            
             return response
+        except (requests.exceptions.SSLError, ssl.SSLError, requests.exceptions.ConnectionError) as e:
+            # Handle SSL errors and connection errors that might be SSL-related
+            ssl_error_message = str(e)
+            logger.error(f"SSL/Connection Error making GET request to {url}: {ssl_error_message}")
+            
+            # Only retry without verification for SSL-specific errors
+            if ('SSL' in ssl_error_message or 'certificate' in ssl_error_message.lower() or 
+                'handshake' in ssl_error_message.lower()):
+                # For SSL errors, we might want to retry with verification disabled as a fallback
+                # Only do this for development/testing - NOT recommended for production use
+                logger.warning("Retrying without SSL verification as fallback...")
+                try:
+                    with self._lock:
+                        response = self.session.get(
+                            url,
+                            headers=headers,
+                            params=params,
+                            timeout=self.timeout,
+                            allow_redirects=True,
+                            verify=False  # Disable verification as fallback
+                        )
+                    response.raise_for_status()
+                    return response
+                except Exception as retry_error:
+                    logger.error(f"Error retrying request without SSL verification: {retry_error}")
+                    raise
+            raise
         except RequestException as e:
             logger.error(f"Error making GET request to {url}: {e}")
             raise
@@ -198,6 +402,34 @@ class NetworkManager:
             
             response.raise_for_status()
             return response
+        except (requests.exceptions.SSLError, ssl.SSLError, requests.exceptions.ConnectionError) as e:
+            # Handle SSL errors and connection errors that might be SSL-related
+            ssl_error_message = str(e)
+            logger.error(f"SSL/Connection Error making POST request to {url}: {ssl_error_message}")
+            
+            # Only retry without verification for SSL-specific errors
+            if ('SSL' in ssl_error_message or 'certificate' in ssl_error_message.lower() or 
+                'handshake' in ssl_error_message.lower()):
+                # For SSL errors, we might want to retry with verification disabled as a fallback
+                # Only do this for development/testing - NOT recommended for production use
+                logger.warning("Retrying without SSL verification as fallback...")
+                try:
+                    with self._lock:
+                        response = self.session.post(
+                            url,
+                            headers=headers,
+                            data=data,
+                            json=json_data,
+                            timeout=self.timeout,
+                            allow_redirects=True,
+                            verify=False  # Disable verification as fallback
+                        )
+                    response.raise_for_status()
+                    return response
+                except Exception as retry_error:
+                    logger.error(f"Error retrying POST request without SSL verification: {retry_error}")
+                    raise
+            raise
         except RequestException as e:
             logger.error(f"Error making POST request to {url}: {e}")
             raise
@@ -226,6 +458,32 @@ class NetworkManager:
             
             response.raise_for_status()
             return response
+        except (requests.exceptions.SSLError, ssl.SSLError, requests.exceptions.ConnectionError) as e:
+            # Handle SSL errors and connection errors that might be SSL-related
+            ssl_error_message = str(e)
+            logger.error(f"SSL/Connection Error making HEAD request to {url}: {ssl_error_message}")
+            
+            # Only retry without verification for SSL-specific errors
+            if ('SSL' in ssl_error_message or 'certificate' in ssl_error_message.lower() or 
+                'handshake' in ssl_error_message.lower()):
+                # For SSL errors, we might want to retry with verification disabled as a fallback
+                # Only do this for development/testing - NOT recommended for production use
+                logger.warning("Retrying without SSL verification as fallback...")
+                try:
+                    with self._lock:
+                        response = self.session.head(
+                            url,
+                            headers=headers,
+                            timeout=self.timeout,
+                            allow_redirects=True,
+                            verify=False  # Disable verification as fallback
+                        )
+                    response.raise_for_status()
+                    return response
+                except Exception as retry_error:
+                    logger.error(f"Error retrying HEAD request without SSL verification: {retry_error}")
+                    raise
+            raise
         except RequestException as e:
             logger.error(f"Error making HEAD request to {url}: {e}")
             raise
@@ -283,6 +541,66 @@ class NetworkManager:
             
             logger.debug(f"Downloaded {downloaded} bytes to {output_path}")
             return True
+        except (requests.exceptions.SSLError, ssl.SSLError, requests.exceptions.ConnectionError) as e:
+            # Handle SSL errors and connection errors that might be SSL-related
+            ssl_error_message = str(e)
+            logger.error(f"SSL/Connection Error downloading file from {url}: {ssl_error_message}")
+            
+            # Only retry without verification for SSL-specific errors
+            if ('SSL' in ssl_error_message or 'certificate' in ssl_error_message.lower() or 
+                'handshake' in ssl_error_message.lower()):
+                # For SSL errors, we might want to retry with verification disabled as a fallback
+                # Only do this for development/testing - NOT recommended for production use
+                logger.warning("Retrying download without SSL verification as fallback...")
+                
+                try:
+                    # Make a streaming request without SSL verification
+                    with self._lock:
+                        response = self.session.get(
+                            url,
+                            headers=headers,
+                            timeout=self.timeout,
+                            stream=True,
+                            verify=False  # Disable verification as fallback
+                        )
+                    
+                    response.raise_for_status()
+                    
+                    # Get total file size
+                    total_size = int(response.headers.get('content-length', 0))
+                    
+                    # Download the file
+                    with open(output_path, 'wb') as f:
+                        downloaded = 0
+                        start_time = time.time()
+                        
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:  # Filter out keep-alive chunks
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                
+                                # Call progress callback if provided
+                                if progress_callback and total_size > 0:
+                                    progress = downloaded / total_size
+                                    elapsed = time.time() - start_time
+                                    progress_callback(progress, downloaded, total_size, elapsed)
+                    
+                    logger.debug(f"Downloaded {downloaded} bytes to {output_path}")
+                    return True
+                except Exception as retry_error:
+                    logger.error(f"Error downloading file from {url} (retry): {retry_error}")
+                    
+                    # Remove partially downloaded file
+                    if os.path.exists(output_path):
+                        os.unlink(output_path)
+                    
+                    return False
+            
+            # Remove partially downloaded file
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+                
+            return False
         except RequestException as e:
             logger.error(f"Error downloading file from {url}: {e}")
             
