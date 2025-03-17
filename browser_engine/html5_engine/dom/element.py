@@ -148,13 +148,20 @@ class Element(Node):
                     return attr.node_value or ""
             return ""
         
-        # For non-leaf nodes, collect text from child text nodes only
-        # Don't recurse through child elements to avoid duplication
+        # For non-leaf nodes, collect text from all child nodes recursively
         text = []
         for child in self.child_nodes:
             if child.node_type == NodeType.TEXT_NODE:
                 if hasattr(child, 'node_value') and child.node_value:
                     text.append(child.node_value)
+            elif child.node_type == NodeType.ELEMENT_NODE:
+                # Skip script and style elements
+                if hasattr(child, 'tag_name') and child.tag_name.lower() in ['script', 'style']:
+                    continue
+                # Recursively get text from child elements
+                child_text = child.text_content
+                if child_text:
+                    text.append(child_text)
         
         return "".join(text)
     

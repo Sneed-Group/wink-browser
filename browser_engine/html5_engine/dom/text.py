@@ -31,6 +31,21 @@ class Text(Node):
         self.node_value = data
         self.data = data  # Alias for node_value
         self.length = len(data)
+        self.text_content = data  # Set text_content to match data
+    
+    @property
+    def textContent(self) -> str:
+        """Get the text content of this text node."""
+        return self.data
+    
+    @textContent.setter
+    def textContent(self, value: str) -> None:
+        """Set the text content of this text node."""
+        if value is None:
+            value = ""
+        self.data = value
+        self.node_value = value
+        self.length = len(value)
     
     @property
     def whole_text(self) -> str:
@@ -61,13 +76,13 @@ class Text(Node):
     
     def split_text(self, offset: int) -> 'Text':
         """
-        Split this text node at the specified offset.
+        Split this text node into two nodes at the specified offset.
         
         Args:
-            offset: The character position to split at
+            offset: The character offset at which to split
             
         Returns:
-            A new text node containing the text after the offset
+            The new text node containing the text after the split point
             
         Raises:
             ValueError: If the offset is invalid
@@ -75,27 +90,18 @@ class Text(Node):
         if offset < 0 or offset > self.length:
             raise ValueError("Invalid split offset")
         
-        if offset == 0 or offset == self.length:
-            # Nothing to split
-            return self
+        # Create new text node with the text after the split point
+        new_node = Text(self.data[offset:], self.owner_document)
         
-        # Extract the text for the new node
-        new_data = self.data[offset:]
-        
-        # Update this node's text
+        # Update this node's text to only include text before the split point
         self.data = self.data[:offset]
         self.node_value = self.data
         self.length = len(self.data)
         
-        # Create a new text node with the second part
-        new_node = Text(new_data, self.owner_document)
-        
         # Insert the new node after this one
         if self.parent_node:
-            if self.next_sibling:
-                self.parent_node.insert_before(new_node, self.next_sibling)
-            else:
-                self.parent_node.append_child(new_node)
+            index = self.parent_node.child_nodes.index(self)
+            self.parent_node.insert_before(new_node, self.next_sibling)
         
         return new_node
     
@@ -186,6 +192,7 @@ class Text(Node):
         self.data = self.data[:offset] + data + self.data[end:]
         self.node_value = self.data
         self.length = len(self.data)
+        self.text_content = self.data  # Update text_content to match data
     
     def clone_node(self, deep: bool = False) -> 'Text':
         """

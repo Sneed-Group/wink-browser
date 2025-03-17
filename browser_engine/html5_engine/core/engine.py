@@ -777,4 +777,62 @@ class HTML5Engine:
             try:
                 handler(error_message)
             except Exception as e:
-                self.logger.error("Error in error handler: %s", str(e)) 
+                self.logger.error("Error in error handler: %s", str(e))
+
+    def _preload_resources(self) -> None:
+        """Preload external resources like images, scripts, and stylesheets."""
+        if not self.document:
+            return
+        
+        processed_urls = set()
+        
+        # Get base URL from document
+        base_url = self.document.url if hasattr(self.document, 'url') else None
+        if not base_url:
+            self.logger.warning("No base URL available for resource loading")
+            return
+        
+        # Process link elements (stylesheets)
+        link_elements = self.document.querySelectorAll("link[rel='stylesheet']")
+        for link in link_elements:
+            href = link.getAttribute("href")
+            if not href or href in processed_urls:
+                continue
+            
+            processed_urls.add(href)
+            
+            # Skip if already loaded
+            if href in self.resources:
+                continue
+            
+            # Resolve URL
+            try:
+                # Handle absolute URLs
+                if href.startswith(('http://', 'https://', 'data:', '//')):
+                    full_url = href
+                else:
+                    # Handle relative URLs
+                    full_url = urllib.parse.urljoin(base_url, href)
+                    
+                    # Validate the URL
+                    parsed_url = urllib.parse.urlparse(full_url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        self.logger.warning(f"Invalid URL after resolution: {full_url}")
+                        continue
+                
+                # Request stylesheet
+                try:
+                    # Import here to avoid circular imports
+                    from browser_engine.network.network_manager import NetworkManager
+                    
+                    # Use network manager to fetch resource
+                    css_content = NetworkManager().fetch(full_url, resource_type="style")
+                    if css_content:
+                        self.resources[href] = css_content.encode('utf-8')
+                        self.logger.debug(f"Stylesheet loaded: {href}")
+                    else:
+                        self.logger.warning(f"Failed to load stylesheet: {href}")
+                except Exception as e:
+                    self.logger.error(f"Error loading stylesheet {href}: {e}")
+            except Exception as e:
+                self.logger.error(f"Error resolving URL {href}: {e}") 

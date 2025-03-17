@@ -383,28 +383,31 @@ class Node:
         Returns:
             The concatenated text content of this node and its descendants
         """
-        # Initialize with empty string
-        result = ""
-        
         # For text nodes, return the node value
         if self.node_type == NodeType.TEXT_NODE:
             return self.node_value or ""
-            
+        
         # For other nodes, recursively get text from children
+        result = []
         for child in self.child_nodes:
+            # Skip script and style elements
+            if hasattr(child, 'node_type') and child.node_type == NodeType.ELEMENT_NODE:
+                if hasattr(child, 'tag_name') and child.tag_name.lower() in ['script', 'style']:
+                    continue
+            
             # Get child's text content
             if hasattr(child, 'textContent'):
                 child_text = child.textContent
                 # Ensure child_text is a string
                 if child_text is not None:
                     if isinstance(child_text, str):
-                        result += child_text
+                        result.append(child_text)
                     else:
                         # Try to convert to string if it's not already a string
                         try:
-                            result += str(child_text)
+                            result.append(str(child_text))
                         except Exception:
                             # If conversion fails, just skip this child
                             pass
-                
-        return result 
+            
+        return "".join(result) 
