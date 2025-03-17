@@ -72,8 +72,6 @@ python main.py --private --text-only https://example.com
   
 - **JavaScript Engine Issues**: The JavaScript engine may occasionally encounter event loop errors. If this happens, try using text-only mode (`--text-only` flag) which disables JavaScript execution.
 
-- **Character Encoding**: The browser has been updated to properly handle various character encodings from websites. If you encounter any text rendering issues, please report them with the URL of the affected site.
-
 ## Configuration
 
 Wink Browser stores its configuration in `~/.wink_browser/config.json`. This includes:
