@@ -2708,3 +2708,268 @@ class HTML5Renderer:
             logging.debug(f"Rendered image placeholder at ({x}, {y}) with dimensions {width}x{height}")
         except Exception as e:
             logging.error(f"Error rendering image placeholder: {e}")
+
+    def _render_form_element(self, layout_box: LayoutBox, x: int, y: int, width: int, height: int) -> None:
+        """
+        Render a form element (input, button, textarea, select).
+        
+        Args:
+            layout_box: The layout box for the form element
+            x: X coordinate
+            y: Y coordinate
+            width: Width of the element
+            height: Height of the element
+        """
+        element = layout_box.element
+        if not element or not hasattr(element, 'tag_name'):
+            return
+            
+        # Get positioning information from layout box
+        x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left
+        y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top
+        width = layout_box.box_metrics.width if hasattr(layout_box.box_metrics, 'width') and layout_box.box_metrics.width is not None else 100
+        height = layout_box.box_metrics.height if hasattr(layout_box.box_metrics, 'height') and layout_box.box_metrics.height is not None else 24
+        
+        # Default height and width if not specified
+        if not isinstance(width, (int, float)) or width <= 0:
+            width = 100
+        if not isinstance(height, (int, float)) or height <= 0:
+            height = 24
+            
+        tag_name = element.tag_name.lower()
+        
+        # Get attributes
+        element_type = element.get_attribute('type') if hasattr(element, 'get_attribute') else None
+        element_value = element.get_attribute('value') if hasattr(element, 'get_attribute') else None
+        element_placeholder = element.get_attribute('placeholder') if hasattr(element, 'get_attribute') else None
+        element_name = element.get_attribute('name') if hasattr(element, 'get_attribute') else None
+        
+        # Default values
+        if not element_type and tag_name == 'input':
+            element_type = 'text'  # Default input type is text
+        if not element_value:
+            element_value = ''
+        
+        # Render different form elements
+        try:
+            if tag_name == 'input':
+                # Handle different input types
+                if element_type in ['text', 'password', 'email', 'number', 'tel', 'url', None]:
+                    # Create a rectangle to represent a text input
+                    input_rect = self.canvas.create_rectangle(
+                        x, y, x + width, y + height,
+                        outline="#cccccc",
+                        fill="#ffffff"
+                    )
+                    self.canvas_items.append(input_rect)
+                    
+                    # Add text content (value or placeholder)
+                    display_text = element_value if element_value else (element_placeholder if element_placeholder else '')
+                    if element_type == 'password' and display_text:
+                        # Show asterisks for password fields
+                        display_text = '*' * len(display_text)
+                        
+                    text_item = self.canvas.create_text(
+                        x + 5, y + height // 2,
+                        text=display_text,
+                        font=("Arial", 10),
+                        fill="#333333" if element_value else "#999999",  # Gray for placeholder
+                        anchor="w"
+                    )
+                    self.canvas_items.append(text_item)
+                    
+                elif element_type == 'checkbox':
+                    # Create a checkbox
+                    checkbox_size = min(16, height)
+                    checkbox_rect = self.canvas.create_rectangle(
+                        x, y + (height - checkbox_size) // 2,
+                        x + checkbox_size, y + (height + checkbox_size) // 2,
+                        outline="#333333",
+                        fill="#ffffff"
+                    )
+                    self.canvas_items.append(checkbox_rect)
+                    
+                    # If checked, add a checkmark
+                    is_checked = element.get_attribute('checked') is not None if hasattr(element, 'get_attribute') else False
+                    if is_checked:
+                        checkmark = self.canvas.create_line(
+                            x + 3, y + (height) // 2,
+                            x + 7, y + (height + checkbox_size) // 2 - 3,
+                            x + checkbox_size - 3, y + (height - checkbox_size) // 2 + 3,
+                            fill="#333333",
+                            width=2
+                        )
+                        self.canvas_items.append(checkmark)
+                    
+                elif element_type == 'radio':
+                    # Create a radio button
+                    radio_size = min(16, height)
+                    radio_oval = self.canvas.create_oval(
+                        x, y + (height - radio_size) // 2,
+                        x + radio_size, y + (height + radio_size) // 2,
+                        outline="#333333",
+                        fill="#ffffff"
+                    )
+                    self.canvas_items.append(radio_oval)
+                    
+                    # If checked, add a dot
+                    is_checked = element.get_attribute('checked') is not None if hasattr(element, 'get_attribute') else False
+                    if is_checked:
+                        dot_size = radio_size // 2
+                        dot = self.canvas.create_oval(
+                            x + (radio_size - dot_size) // 2,
+                            y + (height - dot_size) // 2,
+                            x + (radio_size + dot_size) // 2,
+                            y + (height + dot_size) // 2,
+                            outline="#333333",
+                            fill="#333333"
+                        )
+                        self.canvas_items.append(dot)
+                
+                elif element_type == 'submit' or element_type == 'button':
+                    # Create a button
+                    button_rect = self.canvas.create_rectangle(
+                        x, y, x + width, y + height,
+                        outline="#999999",
+                        fill="#e0e0e0",
+                        width=1
+                    )
+                    self.canvas_items.append(button_rect)
+                    
+                    # Add button text
+                    button_text = element_value if element_value else ('Submit' if element_type == 'submit' else 'Button')
+                    text_item = self.canvas.create_text(
+                        x + width // 2, y + height // 2,
+                        text=button_text,
+                        font=("Arial", 10),
+                        fill="#333333"
+                    )
+                    self.canvas_items.append(text_item)
+                    
+            elif tag_name == 'button':
+                # Create a button
+                button_rect = self.canvas.create_rectangle(
+                    x, y, x + width, y + height,
+                    outline="#999999",
+                    fill="#e0e0e0",
+                    width=1
+                )
+                self.canvas_items.append(button_rect)
+                
+                # Add button text
+                button_text = ''
+                if hasattr(element, 'text_content') and element.text_content:
+                    button_text = element.text_content
+                elif hasattr(element, 'innerText') and element.innerText:
+                    button_text = element.innerText
+                elif element_value:
+                    button_text = element_value
+                else:
+                    button_text = 'Button'
+                    
+                text_item = self.canvas.create_text(
+                    x + width // 2, y + height // 2,
+                    text=button_text,
+                    font=("Arial", 10),
+                    fill="#333333"
+                )
+                self.canvas_items.append(text_item)
+                
+            elif tag_name == 'textarea':
+                # Create a textarea
+                textarea_rect = self.canvas.create_rectangle(
+                    x, y, x + width, y + height,
+                    outline="#cccccc",
+                    fill="#ffffff"
+                )
+                self.canvas_items.append(textarea_rect)
+                
+                # Add text content
+                text_content = ''
+                if hasattr(element, 'text_content') and element.text_content:
+                    text_content = element.text_content
+                elif hasattr(element, 'value') and element.value:
+                    text_content = element.value
+                elif element_value:
+                    text_content = element_value
+                elif element_placeholder:
+                    text_content = element_placeholder
+                    
+                text_item = self.canvas.create_text(
+                    x + 5, y + 5,
+                    text=text_content,
+                    font=("Arial", 10),
+                    fill="#333333" if text_content != element_placeholder else "#999999",
+                    anchor="nw",
+                    width=width - 10  # Allow text wrapping
+                )
+                self.canvas_items.append(text_item)
+                
+            elif tag_name == 'select':
+                # Create a select dropdown
+                select_rect = self.canvas.create_rectangle(
+                    x, y, x + width, y + height,
+                    outline="#cccccc",
+                    fill="#ffffff"
+                )
+                self.canvas_items.append(select_rect)
+                
+                # Add dropdown arrow
+                arrow_size = min(8, height // 2)
+                arrow = self.canvas.create_polygon(
+                    x + width - 15, y + (height - arrow_size) // 2,
+                    x + width - 15 + arrow_size, y + (height - arrow_size) // 2,
+                    x + width - 15 + arrow_size // 2, y + (height + arrow_size) // 2,
+                    fill="#666666"
+                )
+                self.canvas_items.append(arrow)
+                
+                # Find selected option or first option
+                selected_text = "Select..."
+                
+                # Check if there are option elements
+                if hasattr(element, 'child_nodes'):
+                    for child in element.child_nodes:
+                        if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
+                            # Check if this option is selected
+                            is_selected = child.get_attribute('selected') is not None if hasattr(child, 'get_attribute') else False
+                            
+                            if is_selected or selected_text == "Select...":
+                                if hasattr(child, 'text_content') and child.text_content:
+                                    selected_text = child.text_content
+                                elif hasattr(child, 'innerText') and child.innerText:
+                                    selected_text = child.innerText
+                                elif child.get_attribute('value') if hasattr(child, 'get_attribute') else None:
+                                    selected_text = child.get_attribute('value')
+                                    
+                                if is_selected:  # If found a selected option, break
+                                    break
+                
+                # Add selected text
+                text_item = self.canvas.create_text(
+                    x + 5, y + height // 2,
+                    text=selected_text,
+                    font=("Arial", 10),
+                    fill="#333333",
+                    anchor="w"
+                )
+                self.canvas_items.append(text_item)
+                
+            logger.debug(f"Rendered form element {tag_name} at ({x}, {y}) with dimensions {width}x{height}")
+        except Exception as e:
+            logger.error(f"Error rendering form element: {e}")
+            # Render a basic fallback to at least show something
+            fallback_rect = self.canvas.create_rectangle(
+                x, y, x + width, y + height,
+                outline="#ff0000",
+                fill="#ffeeee"
+            )
+            self.canvas_items.append(fallback_rect)
+            
+            fallback_text = self.canvas.create_text(
+                x + width // 2, y + height // 2,
+                text=f"{tag_name}",
+                font=("Arial", 9),
+                fill="#ff0000"
+            )
+            self.canvas_items.append(fallback_text)
