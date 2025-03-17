@@ -42,18 +42,207 @@ class HTMLParser:
             BeautifulSoup: Parsed DOM
         """
         try:
-            # Use html5lib as the parser for better HTML5 compatibility
-            dom = BeautifulSoup(html_content, 'html5lib')
+            # First check if we need to handle any encoding inconsistencies
+            # Sometimes html_content might have encoding markers that conflict with the actual encoding
+            if isinstance(html_content, str):
+                # Clean the HTML content to prevent parsing issues due to special characters
+                html_content = self._clean_html_content(html_content)
+                
+                # Always wrap in a basic HTML structure if it doesn't look like valid HTML
+                if not html_content.strip().startswith('<!DOCTYPE') and not html_content.strip().startswith('<html'):
+                    if not any(tag in html_content.lower() for tag in ['<body', '<head']):
+                        logger.debug("Wrapping content in basic HTML structure")
+                        html_content = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="UTF-8">
+                            <title>Page</title>
+                        </head>
+                        <body>
+                            {html_content}
+                        </body>
+                        </html>
+                        """
+                
+                # Use html5lib as the parser for better HTML5 compatibility
+                # Use the 'html.parser' as a fallback if html5lib has issues
+                try:
+                    dom = BeautifulSoup(html_content, 'html5lib')
+                except Exception as e:
+                    logger.warning(f"html5lib parser failed: {e}, falling back to 'html.parser'")
+                    dom = BeautifulSoup(html_content, 'html.parser')
+            else:
+                # If somehow we got bytes, handle them appropriately
+                try:
+                    # Try to decode as UTF-8 first
+                    decoded_content = html_content.decode('utf-8', errors='replace')
+                    decoded_content = self._clean_html_content(decoded_content)
+                    try:
+                        dom = BeautifulSoup(decoded_content, 'html5lib')
+                    except Exception as e:
+                        logger.warning(f"html5lib parser failed with bytes: {e}, falling back to 'html.parser'")
+                        dom = BeautifulSoup(decoded_content, 'html.parser')
+                except (AttributeError, UnicodeDecodeError) as e:
+                    # If that fails, just pass the bytes to BeautifulSoup
+                    logger.warning(f"Decoding bytes failed: {e}, passing raw bytes to parser")
+                    dom = BeautifulSoup(html_content, 'html.parser')
+            
+            # Clean up problematic elements that might cause rendering issues
+            self._sanitize_dom(dom)
             
             # Add base URL to the dom for reference
             if base_url:
                 self._set_base_url(dom, base_url)
                 
+            # Ensure the DOM has a charset meta tag
+            self._ensure_charset_meta(dom)
+            
             return dom
         except Exception as e:
             logger.error(f"Error parsing HTML: {e}")
             # Return a minimal DOM with an error message
             return self._create_error_dom(str(e))
+    
+    def _clean_html_content(self, html_content: str) -> str:
+        """
+        Clean HTML content to prevent parsing issues.
+        
+        Args:
+            html_content: HTML content to clean
+            
+        Returns:
+            str: Cleaned HTML content
+        """
+        # Handle BOM markers that might appear as characters
+        # Unicode BOM appears as \ufeff at the start of content when incorrectly decoded
+        if html_content.startswith('\ufeff'):
+            logger.debug("Removing BOM marker from the beginning of HTML content")
+            html_content = html_content[1:]
+        
+        # Replace null bytes and other control characters which can cause issues
+        for char in ['\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07', 
+                    '\x08', '\x0b', '\x0c', '\x0e', '\x0f', '\x10', '\x11', '\x12', 
+                    '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', 
+                    '\x1b', '\x1c', '\x1d', '\x1e', '\x1f']:
+            if char in html_content:
+                html_content = html_content.replace(char, '')
+        
+        # Fix common encoding issues in HTML
+        # Replace Windows-1252 "smart quotes" with regular quotes
+        for char, replacement in {
+            '\u2018': "'", '\u2019': "'",  # Single quotes
+            '\u201c': '"', '\u201d': '"',  # Double quotes
+            '\u2013': '-', '\u2014': '--',  # En-dash and em-dash
+            '\u2026': '...', # Ellipsis
+            '\u00a0': ' ',   # Non-breaking space
+        }.items():
+            html_content = html_content.replace(char, replacement)
+        
+        return html_content
+    
+    def _sanitize_dom(self, dom: BeautifulSoup) -> None:
+        """
+        Clean up elements that might cause rendering issues.
+        
+        Args:
+            dom: BeautifulSoup DOM to sanitize
+        """
+        # Remove null bytes and other control characters which can cause issues
+        problematic_controls = ['\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07', 
+                               '\x08', '\x0b', '\x0c', '\x0e', '\x0f', '\x10', '\x11', '\x12', 
+                               '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', 
+                               '\x1b', '\x1c', '\x1d', '\x1e', '\x1f']
+        
+        # Clean text nodes with problematic characters
+        for element in dom.find_all(string=lambda text: text and any(c in text for c in problematic_controls)):
+            new_text = element
+            for char in problematic_controls:
+                new_text = new_text.replace(char, '')
+            element.replace_with(new_text)
+        
+        # Handle encoding declaration mismatches in meta tags
+        meta_tags = dom.find_all('meta', attrs={'http-equiv': lambda x: x and x.lower() == 'content-type'})
+        charset_found = False
+        
+        for meta in meta_tags:
+            content = meta.get('content', '')
+            if 'charset=' in content.lower():
+                charset_found = True
+                # We've already decoded the content, so standardize on UTF-8
+                new_content = re.sub(r'charset=[^;]+', 'charset=UTF-8', content, flags=re.IGNORECASE)
+                meta['content'] = new_content
+        
+        # Clean up any other meta charset tags
+        meta_charset_tags = dom.find_all('meta', attrs={'charset': True})
+        for meta in meta_charset_tags:
+            charset_found = True
+            # Standardize on UTF-8
+            meta['charset'] = 'UTF-8'
+            
+        # Ensure there's a proper charset meta tag with UTF-8
+        head = dom.find('head')
+        if head and not charset_found:
+            # Add a proper UTF-8 charset meta tag
+            charset_meta = dom.new_tag('meta')
+            charset_meta['charset'] = 'UTF-8'
+            if head.contents:
+                head.insert(0, charset_meta)
+            else:
+                head.append(charset_meta)
+                
+        # Clean up any BOM markers that might have been converted to characters
+        for element in dom.find_all(string=lambda text: text and '\ufeff' in text):
+            new_text = element.replace('\ufeff', '')
+            element.replace_with(new_text)
+        
+        # Clean up replacement characters from attribute values which indicate encoding issues
+        for tag in dom.find_all(True):
+            for attr_name, attr_value in list(tag.attrs.items()):
+                if isinstance(attr_value, str) and '\ufffd' in attr_value:
+                    # Try to clean up the attribute value by removing sequences of
+                    # replacement characters, which often indicate binary data
+                    if attr_value.count('\ufffd') > len(attr_value) * 0.3:  # If > 30% are replacement chars
+                        # For src/href attributes with high corruption, remove them to prevent failed requests
+                        if attr_name in ['src', 'href']:
+                            del tag.attrs[attr_name]
+                        else:
+                            # For other attributes, try to clean up
+                            tag.attrs[attr_name] = re.sub(r'\ufffd+', '', attr_value)
+
+        # Remove any script elements with invalid character encoding
+        for script in dom.find_all('script'):
+            if script.string and '\ufffd' in script.string:
+                # If the script content has replacement characters, it's likely corrupt
+                replacement_ratio = script.string.count('\ufffd') / len(script.string) if script.string else 0
+                if replacement_ratio > 0.05:  # If more than 5% are replacement chars
+                    logger.debug("Removing corrupt script element with encoding issues")
+                    script.decompose()
+                else:
+                    # Try to clean up minor corruption
+                    clean_script = re.sub(r'\ufffd+', '', script.string)
+                    script.string = clean_script
+        
+        # Handle base tag to ensure it has proper encoding in href attribute
+        base_tag = dom.find('base')
+        if base_tag and 'href' in base_tag.attrs:
+            href = base_tag.get('href')
+            if href and '\ufffd' in href:
+                # Base tag with encoding issues can break relative URL resolution
+                logger.debug("Removing corrupt base tag with encoding issues")
+                base_tag.decompose()
+                
+        # Clean style elements with encoding issues
+        for style in dom.find_all('style'):
+            if style.string and '\ufffd' in style.string:
+                replacement_ratio = style.string.count('\ufffd') / len(style.string) if style.string else 0
+                if replacement_ratio > 0.05:  # If more than 5% are replacement chars
+                    logger.debug("Removing corrupt style element with encoding issues")
+                    style.decompose()
+                else:
+                    # Try to clean up minor corruption
+                    clean_style = re.sub(r'\ufffd+', '', style.string)
+                    style.string = clean_style
     
     def _set_base_url(self, dom: BeautifulSoup, base_url: str) -> None:
         """
@@ -625,4 +814,46 @@ class HTMLParser:
             return f"url({url})"
         
         # Replace URLs in CSS
-        return re.sub(r'url\(([^)]+)\)', replace_url, css) 
+        return re.sub(r'url\(([^)]+)\)', replace_url, css)
+
+    def _ensure_charset_meta(self, dom: BeautifulSoup) -> None:
+        """
+        Ensure the DOM has a charset meta tag to prevent encoding issues.
+        
+        Args:
+            dom: BeautifulSoup DOM to modify
+        """
+        head = dom.find('head')
+        if not head:
+            # Create head if it doesn't exist
+            html = dom.find('html')
+            if not html:
+                html = dom.new_tag('html')
+                if dom.contents:
+                    dom.contents[0].insert_before(html)
+                else:
+                    dom.append(html)
+            
+            head = dom.new_tag('head')
+            html.insert(0, head)
+        
+        # Check if charset meta tag exists
+        meta_charset = head.find('meta', attrs={'charset': True})
+        meta_http_equiv = head.find('meta', attrs={'http-equiv': lambda x: x and x.lower() == 'content-type'})
+        
+        if not meta_charset and not meta_http_equiv:
+            # Add charset meta tag
+            meta = dom.new_tag('meta')
+            meta['charset'] = 'UTF-8'
+            if head.contents:
+                head.contents[0].insert_before(meta)
+            else:
+                head.append(meta)
+        elif meta_http_equiv and not meta_charset:
+            # Update content-type meta tag
+            content = meta_http_equiv.get('content', '')
+            if 'charset=' not in content.lower():
+                meta_http_equiv['content'] = f"{content}; charset=UTF-8"
+            else:
+                # Replace charset in existing content
+                meta_http_equiv['content'] = re.sub(r'charset=[^;]+', 'charset=UTF-8', content, flags=re.IGNORECASE) 

@@ -142,6 +142,36 @@ class URL:
         return bool(self.scheme and self.hostname)
     
     @property
+    def normalized(self) -> str:
+        """Return a normalized string representation of the URL."""
+        if self.is_special and self.scheme != 'file':
+            return self._url
+        
+        # Create a normalized URL string
+        netloc = self.netloc
+        if self.port and self.port == self.DEFAULT_PORTS.get(self.scheme):
+            # Remove default port
+            netloc = netloc.split(':')[0]
+        
+        # Normalize path
+        path = self._normalize_path(self.path)
+        if not path.startswith('/'):
+            path = '/' + path
+        
+        # Build the URL
+        normalized = f"{self.scheme}://{netloc}{path}"
+        
+        # Add query if present
+        if self.query:
+            normalized += f"?{self.query}"
+        
+        # Add fragment if present
+        if self.fragment:
+            normalized += f"#{self.fragment}"
+            
+        return normalized
+    
+    @property
     def origin(self) -> str:
         """Get the URL origin (scheme + netloc)."""
         if self.is_special and self.scheme != 'file':

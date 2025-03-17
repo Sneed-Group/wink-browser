@@ -15,7 +15,7 @@ A modern, privacy-focused web browser built in Python.
 
 - **HTML Parser**: Efficient HTML parsing using BeautifulSoup and html5lib
 - **CSS Parser**: CSS parsing and styling with cssutils
-- **JavaScript Engine**: JavaScript execution via Pyppeteer (Headless Chrome)
+- **JavaScript Engine**: JavaScript execution via dukpy (embedded JavaScript interpreter)
 - **Network Manager**: Handles HTTP requests, cookies, and caching
 - **Ad Blocker**: Blocks ads and trackers using filter lists
 - **Download Manager**: Manages file downloads with pause/resume support
@@ -155,6 +155,6 @@ This project is licensed under the Sammy Public License - see the LICENSE file f
 
 - [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) for HTML parsing
 - [cssutils](https://pypi.org/project/cssutils/) for CSS parsing
-- [Pyppeteer](https://github.com/pyppeteer/pyppeteer) for JavaScript execution
+- [js2py](https://github.com/vlasovskikh/js2py) for JavaScript execution
 - [Requests](https://requests.readthedocs.io/) for HTTP handling
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the UI 

@@ -9,37 +9,72 @@ import logging
 import webbrowser
 import os
 import threading
+import io
+import cssutils
 from typing import Callable, Optional, Dict, List, Any
 
-from browser_engine.core.engine import BrowserEngine
-from browser_engine.ui.renderer import TkRenderer
+from browser_engine.html5_engine import HTML5Engine
+from browser_engine.html5_engine.rendering import HTML5Renderer
 from browser_engine.ui.dialogs import SettingsDialog
-from browser_engine.utils.config import Config
+from browser_engine.utils.config_manager import ConfigManager
 from browser_engine.utils.url import URL
+from browser_engine.network.network_manager import NetworkManager
+from browser_engine.privacy.ad_blocker import AdBlocker
+from browser_engine.extensions.extension_manager import ExtensionManager
+from browser_engine.utils.profile_manager import ProfileManager
+
+# Suppress cssutils logging
+cssutils.log.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 
 class BrowserWindow:
     """Main browser window implementation."""
     
-    def __init__(self, engine: BrowserEngine):
+    def __init__(self, root, network_manager, ad_blocker, 
+                 extension_manager, profile_manager, config_manager,
+                 disable_javascript=False, private_mode=False, debug_mode=False):
         """
         Initialize the browser window.
         
         Args:
-            engine: The browser engine to use
+            root: The root Tk window
+            network_manager: Network request manager
+            ad_blocker: Ad blocking component
+            extension_manager: Browser extension manager
+            profile_manager: User profile manager
+            config_manager: Browser configuration manager
+            disable_javascript: Whether to disable JavaScript
+            private_mode: Whether to use private browsing mode
+            debug_mode: Whether to enable debug logging
         """
-        self.engine = engine
-        self.config = Config()
+        self.root = root
+        self.network_manager = network_manager
+        self.ad_blocker = ad_blocker
+        self.extension_manager = extension_manager
+        self.profile_manager = profile_manager
+        self.config_manager = config_manager
+        self.disable_javascript = disable_javascript
+        self.private_mode = private_mode
+        self.debug_mode = debug_mode
+        
+        # Browser state
+        self.history = []
+        self.current_history_index = -1
+        self.is_loading = False
+        self.current_url = None
+        self.content_cache = {}
+        
+        # Initialize the HTML5 rendering engine
+        self.html5_engine = HTML5Engine(
+            width=self.root.winfo_width(), 
+            height=self.root.winfo_height(), 
+            debug=self.debug_mode
+        )
         
         # Register for loading state changes
-        self.engine.register_load_callback(self._on_load_state_changed)
-        
-        # Create the main window
-        self.root = tk.Tk()
-        self.root.title("Wink Browser")
-        self.root.geometry("1024x768")
-        self.root.minsize(800, 600)
+        self.html5_engine.on_load(self._on_page_loaded)
+        self.html5_engine.on_error(self._on_page_error)
         
         # Set up icons and theme
         self._setup_theme()
@@ -52,9 +87,6 @@ class BrowserWindow:
         
         # Bind keyboard shortcuts
         self._bind_shortcuts()
-        
-        # Set up renderer
-        self.renderer = TkRenderer(self.content_frame, self.engine)
         
         logger.info("Browser window initialized")
     
@@ -113,7 +145,7 @@ class BrowserWindow:
         view_menu.add_separator()
         
         # Create a checkbutton for text-only mode
-        self.text_only_var = tk.BooleanVar(value=self.engine.text_only_mode)
+        self.text_only_var = tk.BooleanVar(value=self.disable_javascript)
         view_menu.add_checkbutton(
             label="Text-Only Mode", 
             variable=self.text_only_var,
@@ -136,7 +168,7 @@ class BrowserWindow:
         privacy_menu = tk.Menu(self.menu_bar, tearoff=0)
         
         # Create a checkbutton for private browsing
-        self.private_mode_var = tk.BooleanVar(value=self.engine.private_mode)
+        self.private_mode_var = tk.BooleanVar(value=self.private_mode)
         privacy_menu.add_checkbutton(
             label="Private Browsing", 
             variable=self.private_mode_var,
@@ -220,247 +252,448 @@ class BrowserWindow:
         """Create the main content area for displaying web pages."""
         self.content_frame = ttk.Frame(self.root)
         self.content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Initialize the HTML5 renderer with our content frame
+        self.html5_engine.initialize_renderer(self.content_frame)
+        self.renderer = self.html5_engine.renderer
+        
+        # Set up link click handler
+        self.renderer.on_link_click = self._on_link_click
     
     def _bind_shortcuts(self) -> None:
-        """Bind keyboard shortcuts."""
-        self.root.bind("<Control-n>", lambda e: self._new_window())
-        self.root.bind("<Control-Shift-n>", lambda e: self._new_private_window())
-        self.root.bind("<Control-o>", lambda e: self._open_file())
-        self.root.bind("<Control-s>", lambda e: self._save_page())
-        self.root.bind("<Control-p>", lambda e: self._print_page())
-        self.root.bind("<Control-q>", lambda e: self._close())
+        """Bind keyboard shortcuts for common actions."""
+        # Navigation shortcuts
+        self.root.bind("<Alt-Left>", lambda e: self._go_back())
+        self.root.bind("<Alt-Right>", lambda e: self._go_forward())
+        self.root.bind("<F5>", lambda e: self._refresh())
+        self.root.bind("<Control-r>", lambda e: self._refresh())
+        self.root.bind("<Alt-Home>", lambda e: self._go_home())
         
+        # Tab management
+        self.root.bind("<Control-t>", lambda e: self._new_window())
+        self.root.bind("<Control-w>", lambda e: self._close())
+        
+        # Find in page
         self.root.bind("<Control-f>", lambda e: self._find_in_page())
         
+        # Zoom controls
         self.root.bind("<Control-plus>", lambda e: self._zoom_in())
         self.root.bind("<Control-minus>", lambda e: self._zoom_out())
         self.root.bind("<Control-0>", lambda e: self._zoom_reset())
         
-        self.root.bind("<Control-j>", lambda e: self._toggle_text_only_mode())
-        
-        self.root.bind("<Alt-Left>", lambda e: self._go_back())
-        self.root.bind("<Alt-Right>", lambda e: self._go_forward())
-        self.root.bind("<F5>", lambda e: self._refresh())
+        # Developer tools
+        self.root.bind("<F12>", lambda e: self._view_source())
     
     def _on_address_enter(self, event=None) -> None:
-        """Handle Enter key in the address bar."""
+        """Handle address bar enter key press."""
         url = self.url_var.get().strip()
         if url:
-            self.navigate_to(url)
+            self.navigate_to_url(url)
+    
+    def _on_link_click(self, url: str) -> None:
+        """Handle link click events."""
+        self.navigate_to_url(url)
     
     def _update_mode_indicators(self) -> None:
-        """Update the status bar mode indicators."""
-        if self.engine.text_only_mode:
-            self.text_mode_label.config(text="Text-Only Mode")
+        """Update the mode indicator labels."""
+        # Update text-only mode indicator
+        if self.disable_javascript:
+            self.text_mode_label.config(text="Text Mode")
         else:
             self.text_mode_label.config(text="")
-            
-        if self.engine.private_mode:
-            self.private_mode_label.config(text="Private Browsing")
+        
+        # Update private mode indicator
+        if self.private_mode:
+            self.private_mode_label.config(text="Private")
         else:
             self.private_mode_label.config(text="")
     
-    def _on_load_state_changed(self) -> None:
-        """Handle loading state changes."""
-        if self.engine.is_loading:
-            self.status_label.config(text="Loading...")
-            self.refresh_button.config(text="✕")  # Change to stop button
-            self.progress_var.set(self.engine.load_progress)
-        else:
-            if self.engine.current_url:
-                self.status_label.config(text=f"Loaded: {self.engine.current_url}")
-                self.url_var.set(self.engine.current_url)
-                self.root.title(f"{self.engine.page_title} - Wink Browser")
-            else:
-                self.status_label.config(text="Ready")
-                self.root.title("Wink Browser")
-                
-            self.refresh_button.config(text="↻")  # Change back to refresh button
-            self.progress_var.set(0)
-            
-        # Update the content view
-        self.renderer.update()
+    def _on_page_loaded(self) -> None:
+        """Handle page loaded event."""
+        self.is_loading = False
+        
+        # Update UI
+        self.status_label.config(text="Loaded")
+        self.progress_var.set(100)
+        self.refresh_button.config(text="↻")
+        
+        # Update title if available
+        if self.html5_engine.document and self.html5_engine.document.title:
+            self.root.title(f"{self.html5_engine.document.title} - Wink Browser")
     
-    def navigate_to(self, url: str) -> None:
+    def _on_page_error(self, error_message: str) -> None:
+        """Handle page error event."""
+        self.is_loading = False
+        
+        # Update UI
+        self.status_label.config(text=f"Error: {error_message}")
+        self.progress_var.set(0)
+        self.refresh_button.config(text="↻")
+    
+    def navigate_to_url(self, url: str) -> None:
         """
-        Navigate to a URL.
+        Navigate to the specified URL.
         
         Args:
-            url: The URL to navigate to
+            url: URL to navigate to
         """
-        # Make sure URL is properly formatted using our URL utility
-        parsed_url = URL(url)
+        # Normalize and validate URL
+        url_obj = URL(url)
+        normalized_url = url_obj.normalized
         
-        # Load the URL using the engine
-        self.engine.load_url(str(parsed_url))
+        # Update address bar
+        self.url_var.set(normalized_url)
+        
+        # Update status
+        self.status_label.config(text=f"Loading {normalized_url}...")
+        self.progress_var.set(20)
+        self.is_loading = True
+        
+        # Change refresh button to stop button during loading
+        self.refresh_button.config(text="✕")
+        
+        # Update history if this is a new navigation (not back/forward)
+        if self.current_history_index == len(self.history) - 1:
+            # Add to history
+            self.history.append(normalized_url)
+            self.current_history_index += 1
+        elif self.current_history_index < len(self.history) - 1:
+            # Navigating after using back button, remove forward history
+            self.history = self.history[:self.current_history_index + 1]
+            self.history.append(normalized_url)
+            self.current_history_index += 1
+        
+        # Update navigation buttons
+        self._update_navigation_state()
+        
+        # Set current URL
+        self.current_url = normalized_url
+        
+        # Check if URL is in cache
+        if normalized_url in self.content_cache and not self.private_mode:
+            # Load from cache
+            cached_content = self.content_cache[normalized_url]
+            self._load_content_from_cache(cached_content)
+            return
+        
+        # Start a new thread for loading
+        threading.Thread(
+            target=self._load_url_in_thread, 
+            args=(normalized_url,),
+            daemon=True
+        ).start()
+    
+    def _load_url_in_thread(self, url: str) -> None:
+        """
+        Load URL in a separate thread to avoid UI freezing.
+        
+        Args:
+            url: URL to load
+        """
+        try:
+            # Apply ad blocker if enabled
+            url = self.ad_blocker.process_url(url) if self.ad_blocker else url
+            
+            # Use the HTML5 engine to load the URL
+            self.html5_engine.load_url(url)
+            
+            # Update progress
+            self.root.after(0, lambda: self.progress_var.set(100))
+            
+            # Update renderer
+            self.root.after(0, lambda: self._update_renderer())
+            
+            # Cache content if not in private mode
+            if not self.private_mode:
+                self.content_cache[url] = {
+                    'document': self.html5_engine.document,
+                    'layout': self.html5_engine.layout_engine
+                }
+            
+        except Exception as e:
+            logger.error(f"Error loading URL: {e}")
+            error_message = str(e)
+            self.root.after(0, lambda msg=error_message: self._on_page_error(msg))
+    
+    def _load_content_from_cache(self, cached_content: Dict) -> None:
+        """
+        Load content from cache.
+        
+        Args:
+            cached_content: Cached content dict
+        """
+        # Set document and layout from cache
+        self.html5_engine.document = cached_content['document']
+        self.html5_engine.layout_engine = cached_content['layout']
+        
+        # Update renderer
+        self._update_renderer()
+        
+        # Update UI
+        self._on_page_loaded()
+    
+    def _update_renderer(self) -> None:
+        """Update the renderer with the current document."""
+        if self.html5_engine.document:
+            self.renderer.render(self.html5_engine.document)
+    
+    def _update_navigation_state(self) -> None:
+        """Update navigation buttons based on history state."""
+        # Update back button
+        if self.current_history_index > 0:
+            self.back_button.config(state=tk.NORMAL)
+        else:
+            self.back_button.config(state=tk.DISABLED)
+        
+        # Update forward button
+        if self.current_history_index < len(self.history) - 1:
+            self.forward_button.config(state=tk.NORMAL)
+        else:
+            self.forward_button.config(state=tk.DISABLED)
+    
+    def load_homepage(self) -> None:
+        """Load the configured homepage."""
+        homepage = self.config_manager.get('browser', 'homepage')
+        self.navigate_to_url(homepage)
     
     def _go_back(self) -> None:
         """Navigate back in history."""
-        self.engine.go_back()
+        if self.current_history_index > 0:
+            self.current_history_index -= 1
+            url = self.history[self.current_history_index]
+            self.url_var.set(url)
+            self.navigate_to_url(url)
+            self._update_navigation_state()
     
     def _go_forward(self) -> None:
         """Navigate forward in history."""
-        self.engine.go_forward()
+        if self.current_history_index < len(self.history) - 1:
+            self.current_history_index += 1
+            url = self.history[self.current_history_index]
+            self.url_var.set(url)
+            self.navigate_to_url(url)
+            self._update_navigation_state()
     
     def _refresh(self) -> None:
-        """Refresh the current page or stop loading."""
-        if self.engine.is_loading:
-            self.engine.stop_loading()
+        """Refresh the current page."""
+        if self.is_loading:
+            # Stop loading
+            self.is_loading = False
+            self.status_label.config(text="Stopped")
+            self.refresh_button.config(text="↻")
         else:
-            self.engine.refresh()
+            # Refresh the page
+            if self.current_url:
+                # Remove from cache to force reload
+                if self.current_url in self.content_cache:
+                    del self.content_cache[self.current_url]
+                
+                self.navigate_to_url(self.current_url)
     
     def _go_home(self) -> None:
-        """Navigate to the home page."""
-        home_url = self.config.get("browser.home_page", "https://www.example.com")
-        self.navigate_to(home_url)
+        """Navigate to homepage."""
+        self.load_homepage()
     
     def _toggle_text_only_mode(self) -> None:
-        """Toggle text-only mode."""
-        new_state = self.text_only_var.get()
-        self.engine.set_text_only_mode(new_state)
+        """Toggle text-only (JavaScript disabled) mode."""
+        self.disable_javascript = self.text_only_var.get()
         self._update_mode_indicators()
+        
+        # Refresh current page if needed
+        if self.current_url:
+            self._refresh()
     
     def _toggle_private_mode(self) -> None:
         """Toggle private browsing mode."""
-        new_state = self.private_mode_var.get()
-        self.engine.set_private_mode(new_state)
+        self.private_mode = self.private_mode_var.get()
         self._update_mode_indicators()
+        
+        # Clear cache if entering private mode
+        if self.private_mode:
+            self.content_cache.clear()
     
     def _new_window(self) -> None:
         """Open a new browser window."""
-        # In a real implementation, we would create a new browser window
-        messagebox.showinfo("New Window", "This would open a new browser window.")
+        # This should be implemented by the main app
+        pass
     
     def _new_private_window(self) -> None:
         """Open a new private browser window."""
-        # In a real implementation, we would create a new private browser window
-        messagebox.showinfo("New Private Window", "This would open a new private browser window.")
+        # This should be implemented by the main app
+        pass
     
     def _open_file(self) -> None:
         """Open a local HTML file."""
         file_path = filedialog.askopenfilename(
-            title="Open File",
             filetypes=[
-                ("HTML Files", "*.html;*.htm"),
-                ("All Files", "*.*")
-            ]
-        )
-        
-        if file_path:
-            file_url = f"file://{os.path.abspath(file_path)}"
-            self.navigate_to(file_url)
-    
-    def _save_page(self) -> None:
-        """Save the current page to a file."""
-        if not self.engine.current_url:
-            messagebox.showinfo("Save Page", "No page to save.")
-            return
-            
-        file_path = filedialog.asksaveasfilename(
-            title="Save Page As",
-            defaultextension=".html",
-            filetypes=[
-                ("HTML Files", "*.html"),
-                ("All Files", "*.*")
+                ("HTML files", "*.html;*.htm"),
+                ("All files", "*.*")
             ]
         )
         
         if file_path:
             try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(self.engine.get_rendered_content())
-                messagebox.showinfo("Save Page", "Page saved successfully.")
+                self.html5_engine.load_file(file_path)
+                self._update_renderer()
+                self._on_page_loaded()
+                
+                # Update address bar with file URL
+                file_url = f"file://{os.path.abspath(file_path)}"
+                self.url_var.set(file_url)
+                
             except Exception as e:
-                messagebox.showerror("Save Page", f"Error saving page: {e}")
+                logger.error(f"Error opening file: {e}")
+                self._on_page_error(str(e))
+    
+    def _save_page(self) -> None:
+        """Save the current page to a local file."""
+        if not self.html5_engine.document:
+            messagebox.showinfo("Save Page", "No page to save.")
+            return
+            
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[
+                ("HTML files", "*.html"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            try:
+                # Get the HTML content
+                if hasattr(self.html5_engine.document, 'prettify'):
+                    # BeautifulSoup document
+                    html_content = self.html5_engine.document.prettify()
+                else:
+                    # Custom document with serialization
+                    html_content = self.html5_engine.document.serialize()
+                
+                # Write to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                    
+                messagebox.showinfo("Save Page", "Page saved successfully.")
+                
+            except Exception as e:
+                logger.error(f"Error saving page: {e}")
+                messagebox.showerror("Save Page", f"Error saving page: {str(e)}")
     
     def _print_page(self) -> None:
         """Print the current page."""
-        messagebox.showinfo("Print", "Printing is not implemented in this demo.")
+        messagebox.showinfo("Print", "Printing not implemented yet.")
     
     def _find_in_page(self) -> None:
-        """Find text in the current page."""
-        # In a real implementation, we would show a find dialog
-        messagebox.showinfo("Find", "Find in page is not implemented in this demo.")
+        """Open find in page dialog."""
+        messagebox.showinfo("Find", "Find in page not implemented yet.")
     
     def _zoom_in(self) -> None:
-        """Zoom in the current page."""
+        """Zoom in the page view."""
         self.renderer.zoom_in()
+        self._update_renderer()
     
     def _zoom_out(self) -> None:
-        """Zoom out the current page."""
+        """Zoom out the page view."""
         self.renderer.zoom_out()
+        self._update_renderer()
     
     def _zoom_reset(self) -> None:
         """Reset zoom to default level."""
         self.renderer.zoom_reset()
+        self._update_renderer()
     
     def _view_source(self) -> None:
         """View the source code of the current page."""
-        if not self.engine.current_url:
+        if not self.html5_engine.document:
             messagebox.showinfo("View Source", "No page to view source.")
             return
-            
+        
         # Create a new window for the source view
         source_window = tk.Toplevel(self.root)
-        source_window.title(f"Source: {self.engine.current_url}")
+        source_window.title("Page Source")
         source_window.geometry("800x600")
         
-        # Create a text widget with scrollbar
-        text_frame = ttk.Frame(source_window)
-        text_frame.pack(fill=tk.BOTH, expand=True)
+        # Create a text widget with scrollbars
+        source_frame = ttk.Frame(source_window)
+        source_frame.pack(fill=tk.BOTH, expand=True)
         
-        scrollbar = ttk.Scrollbar(text_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        v_scrollbar = ttk.Scrollbar(source_frame, orient=tk.VERTICAL)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        text_widget = tk.Text(text_frame, wrap=tk.NONE, yscrollcommand=scrollbar.set)
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        h_scrollbar = ttk.Scrollbar(source_frame, orient=tk.HORIZONTAL)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
-        scrollbar.config(command=text_widget.yview)
+        source_text = tk.Text(
+            source_frame,
+            wrap=tk.NONE,
+            yscrollcommand=v_scrollbar.set,
+            xscrollcommand=h_scrollbar.set,
+            font=("Courier", 12)
+        )
+        source_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Insert the source code
-        text_widget.insert(tk.END, self.engine.get_rendered_content())
-        text_widget.config(state=tk.DISABLED)  # Make it read-only
+        v_scrollbar.config(command=source_text.yview)
+        h_scrollbar.config(command=source_text.xview)
+        
+        # Get the HTML content
+        if hasattr(self.html5_engine.document, 'prettify'):
+            # BeautifulSoup document
+            html_content = self.html5_engine.document.prettify()
+        else:
+            # Custom document with serialization
+            html_content = self.html5_engine.document.serialize()
+        
+        # Insert the content
+        source_text.insert(tk.END, html_content)
+        source_text.config(state=tk.DISABLED)
     
     def _search(self) -> None:
         """Perform a web search."""
-        query = self.url_var.get().strip()
-        if query:
-            if ' ' in query and not query.startswith(('http://', 'https://')):
-                # This looks like a search query
-                search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-                self.navigate_to(search_url)
-            else:
-                # This might be a URL
-                self.navigate_to(query)
+        search_terms = self.url_var.get().strip()
+        
+        if not search_terms:
+            return
+            
+        # Check if the input is a URL
+        if URL(search_terms).is_valid:
+            self.navigate_to_url(search_terms)
+            return
+            
+        # Otherwise, treat as search terms
+        search_engine = self.config_manager.get('browser', 'search_engine')
+        search_template = self.config_manager.get('browser', 'search_template')
+        
+        # Format the search URL
+        search_url = search_template.replace('{searchTerms}', search_terms)
+        
+        # Navigate to the search URL
+        self.navigate_to_url(search_url)
     
     def _show_settings(self) -> None:
-        """Show the settings dialog."""
-        # In a real implementation, we would show a settings dialog
-        messagebox.showinfo("Settings", "Settings dialog is not implemented in this demo.")
+        """Show settings dialog."""
+        dialog = SettingsDialog(self.root, self.config_manager)
+        dialog.show()
     
     def _clear_data(self) -> None:
         """Clear browsing data."""
-        # In a real implementation, we would clear browsing data
-        messagebox.showinfo("Clear Data", "This would clear browsing data.")
+        # Clear the content cache
+        self.content_cache.clear()
+        messagebox.showinfo("Privacy", "Browsing data cleared.")
     
     def _ad_blocker_settings(self) -> None:
         """Show ad blocker settings."""
-        # In a real implementation, we would show ad blocker settings
-        messagebox.showinfo("Ad Blocker", "Ad blocker settings are not implemented in this demo.")
+        messagebox.showinfo("Ad Blocker", "Ad blocker settings not implemented yet.")
     
     def _show_about(self) -> None:
-        """Show the about dialog."""
+        """Show about dialog."""
         messagebox.showinfo(
             "About Wink Browser",
-            "Wink Browser\nVersion 0.1.0\n\n"
-            "A privacy-focused web browser with its own rendering engine.\n\n"
-            "Copyright © 2023 Wink Browser Team"
+            "Wink Browser\n"
+            "A modern privacy-focused web browser\n"
+            "Version 0.1.0\n\n"
+            "© 2023 Wink Browser Project"
         )
     
     def _close(self) -> None:
         """Close the browser window."""
-        self.root.destroy()
-    
-    def start(self) -> None:
-        """Start the main UI loop."""
-        self.root.mainloop() 
+        self.root.destroy() 

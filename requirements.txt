@@ -1,12 +1,12 @@
 # Core dependencies
-requests>=2.28.1
+requests>=2.31.0  # Updated for better HTTPS support
 beautifulsoup4>=4.11.1
 html5lib>=1.1
 cssutils>=2.6.0
-pyppeteer>=1.0.2
 pillow>=9.2.0
-websockets>=10.4  # Required for pyppeteer WebSocket communication
 python-magic>=0.4.27  # For content type detection
+certifi>=2023.7.22  # For SSL certificate validation
+urllib3>=2.0.7,<3.0  # Updated for better HTTPS support
 
 # UI dependencies
 # Note: Tkinter comes with Python installation, not via pip
@@ -43,7 +43,6 @@ black>=22.6.0
 # Additional dependencies
 numpy>=1.26.0  # Updated for Python 3.13 compatibility
 cryptography>=41.0.3  # For secure content
-urllib3<1.27,>=1.21.1  # Compatible with requests
 typing_extensions>=4.7.1  # For enhanced type hints
 
 # System dependencies (require separate installation)
@@ -54,4 +53,7 @@ typing_extensions>=4.7.1  # For enhanced type hints
 # PyGObject==3.46.0  # For GUI components
 
 # Configuration
-PyYAML>=6.0.1  # For configuration 
+PyYAML>=6.0.1  # For configuration
+
+# New JS execution dependency (replacing pyppeteer)
+dukpy>=0.3.0  # For JavaScript execution using an embedded JS engine 

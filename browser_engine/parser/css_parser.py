@@ -473,4 +473,53 @@ class CSSParser:
         Returns:
             List[str]: Sorted list of selectors
         """
-        return sorted(selectors, key=self.specificity) 
+        return sorted(selectors, key=self.specificity)
+    
+    def get_rules_by_type(self, stylesheet: cssutils.css.CSSStyleSheet, rule_type: int) -> List[Any]:
+        """
+        Get all rules of a specific type from a stylesheet.
+        
+        Args:
+            stylesheet: CSS stylesheet
+            rule_type: Rule type constant from cssutils.css.CSSRule
+            
+        Returns:
+            List[Any]: List of rules of the specified type
+        """
+        if not stylesheet:
+            return []
+            
+        rules = []
+        
+        try:
+            for rule in stylesheet.cssRules:
+                if rule.type == rule_type:
+                    rules.append(rule)
+        except Exception as e:
+            logger.error(f"Error accessing rules in stylesheet: {e}")
+        
+        return rules
+    
+    def get_import_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> List[cssutils.css.CSSImportRule]:
+        """
+        Get all @import rules from a stylesheet.
+        
+        Args:
+            stylesheet: CSS stylesheet
+            
+        Returns:
+            List[cssutils.css.CSSImportRule]: List of @import rules
+        """
+        return self.get_rules_by_type(stylesheet, cssutils.css.CSSRule.IMPORT_RULE)
+    
+    def get_font_face_rules(self, stylesheet: cssutils.css.CSSStyleSheet) -> List[cssutils.css.CSSFontFaceRule]:
+        """
+        Get all @font-face rules from a stylesheet.
+        
+        Args:
+            stylesheet: CSS stylesheet
+            
+        Returns:
+            List[cssutils.css.CSSFontFaceRule]: List of @font-face rules
+        """
+        return self.get_rules_by_type(stylesheet, cssutils.css.CSSRule.FONT_FACE_RULE) 
