@@ -4,6 +4,7 @@ URL utility for parsing and manipulating URLs.
 
 import logging
 import urllib.parse
+import re
 from typing import Dict, List, Optional, Any, Tuple
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,12 @@ class URL:
     
     # Special URL schemes that don't require network requests
     SPECIAL_SCHEMES = {'about', 'data', 'javascript', 'blob', 'file'}
+    
+    # Common file extensions for web resources
+    FILE_EXTENSIONS = {
+        'html', 'htm', 'php', 'asp', 'aspx', 'jsp', 'css', 'js', 'json', 
+        'xml', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'txt'
+    }
     
     def __init__(self, url: str, base_url: Optional[str] = None):
         """
@@ -56,8 +63,19 @@ class URL:
             
         # Ensure URL has scheme - default to https:// for security
         if "://" not in url:
-            # Check if it looks like a domain name (contains a dot)
-            if "." in url and not url.startswith("/"):
+            # Check if it looks like a domain name
+            # Domain pattern: something like example.com, www.example.co.uk
+            domain_pattern = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
+            
+            # Check if it has a file extension
+            has_file_extension = False
+            if "." in url:
+                extension = url.split(".")[-1].lower()
+                # Check if the extension looks like a file extension
+                has_file_extension = extension in self.FILE_EXTENSIONS or len(extension) <= 4
+            
+            if "." in url and not url.startswith("/") and domain_pattern.match(url):
+                # Looks like a domain name (e.g., example.com)
                 url = "https://" + url
             # Check if it's a relative path (starts with /, ./ or ../)
             elif url.startswith("/") or url.startswith("./") or url.startswith("../"):
@@ -74,8 +92,8 @@ class URL:
                     self._parsed = urllib.parse.urlparse("about:blank")
                     logger.debug(f"Relative URL parsed without base: {url}")
                     return
-            # Check if it's a plain filename or directory path
-            elif "/" in url or "." in url:
+            # Check if it's a plain filename or path (like "about.html" or "images/logo.png")
+            elif "/" in url or has_file_extension:
                 # For relative URLs, resolve against the base URL
                 if base_url:
                     resolved_url = urllib.parse.urljoin(base_url, url)
@@ -83,10 +101,10 @@ class URL:
                     self._parsed = urllib.parse.urlparse(resolved_url)
                     logger.debug(f"Relative path resolved: {url} against base: {base_url} -> {resolved_url}")
                     return
-                else:
-                    # If no base URL, keep the relative URL as is
-                    self._url = url
-                    self._parsed = urllib.parse.urlparse("about:blank")
+                elif base_url.endswith("html") or base_url.endswith("htm") or base_url.endswith("php") or base_url.endswith("asp") or base_url.endswith("aspx") or base_url.endswith("jsp") or base_url.endswith("php"):
+                    resolved_url = urllib.parse.urljoin(base_url, "/", url)
+                    self._url = resolved_url
+                    self._parsed = urllib.parse.urlparse(resolved_url)
                     logger.debug(f"Relative path parsed without base: {url}")
                     return
             # Just a search term
@@ -94,10 +112,12 @@ class URL:
                 # Could use a default search engine here
                 url = "https://search.sparksammy.com/search.php?p=0&t=0&q=" + urllib.parse.quote(url)
         
+
         self._url = url
         self._parsed = urllib.parse.urlparse(url)
         
         logger.debug(f"URL parsed: {url}")
+
     
     @property
     def scheme(self) -> str:
