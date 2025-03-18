@@ -5,6 +5,7 @@ This module handles layout calculations for HTML elements based on the CSS box m
 
 import logging
 import re
+import math
 from typing import Dict, List, Optional, Tuple, Any, Union, Set
 from enum import Enum
 
@@ -329,17 +330,35 @@ class LayoutEngine:
             
             if width == 0:
                 if layout_box.display == DisplayType.BLOCK:
-                    # Block elements take up full container width minus margins
+                    # Block elements take up full container width minus box model properties
                     margin_left = layout_box.box_metrics.margin_left
                     margin_right = layout_box.box_metrics.margin_right
+                    padding_left = layout_box.box_metrics.padding_left
+                    padding_right = layout_box.box_metrics.padding_right
+                    border_left = layout_box.box_metrics.border_left_width
+                    border_right = layout_box.box_metrics.border_right_width
                     
                     # Convert string values to float, handling 'auto' as 0
                     if isinstance(margin_left, str):
                         margin_left = 0 if margin_left == 'auto' else float(margin_left)
                     if isinstance(margin_right, str):
                         margin_right = 0 if margin_right == 'auto' else float(margin_right)
+                    if isinstance(padding_left, str):
+                        padding_left = 0 if padding_left == 'auto' else float(padding_left)
+                    if isinstance(padding_right, str):
+                        padding_right = 0 if padding_right == 'auto' else float(padding_right)
+                    if isinstance(border_left, str):
+                        border_left = 0 if border_left == 'auto' else float(border_left)
+                    if isinstance(border_right, str):
+                        border_right = 0 if border_right == 'auto' else float(border_right)
                     
-                    layout_box.box_metrics.content_width = container_width - margin_left - margin_right
+                    # Calculate total box model properties
+                    total_margin = margin_left + margin_right
+                    total_padding = padding_left + padding_right
+                    total_border = border_left + border_right
+                    
+                    # Content width fills available space minus all box model properties
+                    layout_box.box_metrics.content_width = container_width - total_margin - total_padding - total_border
                 else:
                     # Inline elements use a percentage of container width
                     layout_box.box_metrics.content_width = int(container_width * 0.8)  # 80% of container width
@@ -513,45 +532,45 @@ class LayoutEngine:
     def _calculate_element_spacing(self, element: LayoutBox, prev_tag: Optional[str]) -> int:
         """Calculate spacing between elements based on their types."""
         if not hasattr(element.element, 'tag_name'):
-            return 10  # Default spacing
+            return 16  # Default spacing
             
         current_tag = element.element.tag_name.lower()
         
         # Base spacing for different element types
         base_spacing = {
-            'h1': 5,   # Reduced from 10
-            'h2': 4,   # Reduced from 9
-            'h3': 3,   # Reduced from 8
-            'h4': 3,   # Reduced from 7
-            'h5': 2,   # Reduced from 6
-            'h6': 2,   # Reduced from 5
-            'p': 2,    # Reduced from 5
-            'div': 1,  # Reduced from 4
-            'pre': 2,  # Reduced from 6
-            'a': 0,    # Reduced from 2
-            'span': 0  # Reduced from 1
+            'h1': 32,   # Large spacing for main headings
+            'h2': 24,   # Medium spacing for subheadings
+            'h3': 20,   # Medium spacing for subheadings
+            'h4': 16,   # Smaller spacing for subheadings
+            'h5': 12,   # Smaller spacing for subheadings
+            'h6': 12,   # Smaller spacing for subheadings
+            'p': 16,    # Standard paragraph spacing
+            'div': 8,   # Smaller spacing for divs
+            'pre': 16,  # Code block spacing
+            'a': 4,     # Small spacing for links
+            'span': 0   # No spacing for inline elements
         }
         
         # Get base spacing for current element
-        spacing = base_spacing.get(current_tag, 1)  # Reduced default from 2 to 1
+        spacing = base_spacing.get(current_tag, 8)  # Default spacing
         
         # Adjust spacing based on previous element
         if prev_tag:
             # Add extra spacing between text blocks
             if prev_tag in ['p', 'pre', 'div'] and current_tag in ['p', 'pre', 'div']:
-                spacing += 1  # Reduced from 2
+                spacing += 8
             
             # Add extra spacing before headings
             if current_tag.startswith('h') and len(current_tag) == 2:
-                spacing += 2  # Reduced from 4
+                spacing += 16
             
             # Add extra spacing after headings
             if prev_tag.startswith('h') and len(prev_tag) == 2:
-                spacing += 1  # Reduced from 2
+                spacing += 8
             
             # Reduce spacing between inline elements
             if prev_tag in ['a', 'span'] and current_tag in ['a', 'span']:
-                spacing = 1
+                spacing = 2
         
         return spacing
 
@@ -826,74 +845,93 @@ class LayoutEngine:
             'border-left-width': '0px',
             'position': 'static',
             'float': 'none',
-            'line-height': '1.5',  # Add default line height for all elements
-            'font-size': '16px',   # Set a reasonable default font size
+            'line-height': '1.5',
+            'font-size': '16px',
         }
         
-        # Add tag-specific defaults with increased vertical spacing
+        # Add tag-specific defaults with natural vertical spacing
         if tag_name == 'body':
             defaults.update({
-                'margin-top': '8px',     # Reduced from 24px
-                'margin-right': '8px',   # Reduced from 24px
-                'margin-bottom': '8px',  # Reduced from 24px
-                'margin-left': '8px',    # Reduced from 24px
-                'line-height': '1.2',    # Reduced from 1.6
+                'margin-top': '16px',
+                'margin-right': '16px',
+                'margin-bottom': '16px',
+                'margin-left': '16px',
+                'line-height': '1.6',
             })
         # Block elements
         elif tag_name == 'div':
             defaults.update({
-                'margin-top': '0.3em',    # Reduced from 1.5em
-                'margin-bottom': '0.3em',  # Reduced from 1.5em
+                'margin-top': '1em',
+                'margin-bottom': '1em',
             })
         elif tag_name == 'p':
             defaults.update({
-                'margin-top': '0.3em',    # Reduced from 1.5em
-                'margin-bottom': '0.3em',  # Reduced from 1.5em
-                'line-height': '1.2',     # Reduced from 1.7
+                'margin-top': '1em',
+                'margin-bottom': '1em',
+                'line-height': '1.6',
             })
-        # Headings with progressively smaller margins
+        # Headings with progressively smaller margins and larger font sizes
         elif tag_name == 'h1':
             defaults.update({
-                'margin-top': '0.5em',    # Reduced from 2.5em
-                'margin-bottom': '0.3em',  # Reduced from 1.2em
-                'line-height': '1.1',      # Reduced from 1.3
+                'margin-top': '2em',
+                'margin-bottom': '1em',
+                'line-height': '1.2',
+                'font-size': '2.5em',
             })
         elif tag_name == 'h2':
             defaults.update({
-                'margin-top': '0.4em',    # Reduced from 2.2em
-                'margin-bottom': '0.3em',  # Reduced from 1.1em
-                'line-height': '1.1',      # Reduced from 1.3
+                'margin-top': '1.8em',
+                'margin-bottom': '0.8em',
+                'line-height': '1.2',
+                'font-size': '2em',
             })
         elif tag_name == 'h3':
             defaults.update({
-                'margin-top': '0.3em',    # Reduced from 2em
-                'margin-bottom': '0.2em',  # Reduced from 1em
-                'line-height': '1.1',      # Reduced from 1.3
+                'margin-top': '1.5em',
+                'margin-bottom': '0.7em',
+                'line-height': '1.2',
+                'font-size': '1.75em',
             })
-        elif tag_name in ('h4', 'h5', 'h6'):
+        elif tag_name == 'h4':
             defaults.update({
-                'margin-top': '0.2em',    # Reduced from 1.8em
-                'margin-bottom': '0.2em',  # Reduced from 0.9em
-                'line-height': '1.1',      # Reduced from 1.3
+                'margin-top': '1.2em',
+                'margin-bottom': '0.6em',
+                'line-height': '1.2',
+                'font-size': '1.5em',
+            })
+        elif tag_name == 'h5':
+            defaults.update({
+                'margin-top': '1em',
+                'margin-bottom': '0.5em',
+                'line-height': '1.2',
+                'font-size': '1.25em',
+            })
+        elif tag_name == 'h6':
+            defaults.update({
+                'margin-top': '0.8em',
+                'margin-bottom': '0.4em',
+                'line-height': '1.2',
+                'font-size': '1.1em',
             })
         # Lists
         elif tag_name in ('ul', 'ol'):
             defaults.update({
-                'margin-top': '0.3em',    # Reduced from 1.5em
-                'margin-bottom': '0.3em',  # Reduced from 1.5em
-                'padding-left': '20px',    # Reduced from 40px
+                'margin-top': '1em',
+                'margin-bottom': '1em',
+                'padding-left': '40px',
             })
         elif tag_name == 'li':
             defaults.update({
-                'margin-top': '0.1em',    # Reduced from 0.8em
-                'margin-bottom': '0.1em',  # Reduced from 0.8em
-                'line-height': '1.2',      # Reduced from 1.6
+                'margin-top': '0.5em',
+                'margin-bottom': '0.5em',
+                'line-height': '1.6',
             })
         # Table elements
         elif tag_name == 'table':
             defaults.update({
                 'margin-top': '2em',
                 'margin-bottom': '2em',
+                'border-collapse': 'collapse',
             })
         # Form elements
         elif tag_name == 'form':
@@ -903,9 +941,10 @@ class LayoutEngine:
             })
         elif tag_name in ('input', 'button', 'textarea', 'select'):
             defaults.update({
-                'margin-top': '0.8em',
-                'margin-bottom': '0.8em',
-                'padding': '6px',  # Add padding to form elements
+                'margin-top': '0.5em',
+                'margin-bottom': '0.5em',
+                'padding': '8px',
+                'line-height': '1.4',
             })
         # Inline elements
         elif tag_name == 'span':
@@ -915,9 +954,11 @@ class LayoutEngine:
         # Image elements
         elif tag_name == 'img':
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
+                'margin-top': '1em',
+                'margin-bottom': '1em',
                 'display': 'inline-block',
+                'max-width': '100%',
+                'height': 'auto',
             })
         # Add spacious margins for other structural elements
         elif tag_name in ('section', 'article', 'header', 'footer', 'nav', 'aside'):
@@ -1291,26 +1332,148 @@ class LayoutEngine:
         box.box_metrics.y = start_y
         
         # Calculate width if not explicitly set
-        if box.box_metrics.width is None:
+        if box.box_metrics.width is None or (isinstance(box.box_metrics.width, str) and box.box_metrics.width == 'auto'):
             if box.display == DisplayType.BLOCK:
-                # Block elements expand to fill container width
-                content_width = container_width - box.box_metrics.margin_left - box.box_metrics.margin_right
-                box.box_metrics.width = content_width - box.box_metrics.padding_left - box.box_metrics.padding_right - box.box_metrics.border_left_width - box.box_metrics.border_right_width
-            else:
+                # Block elements expand to fill container width minus box model properties
+                margin_left = box.box_metrics.margin_left
+                margin_right = box.box_metrics.margin_right
+                padding_left = box.box_metrics.padding_left
+                padding_right = box.box_metrics.padding_right
+                border_left = box.box_metrics.border_left_width
+                border_right = box.box_metrics.border_right_width
+                
+                # Convert string values to float, handling 'auto' as 0
+                if isinstance(margin_left, str):
+                    margin_left = 0 if margin_left == 'auto' else float(margin_left)
+                if isinstance(margin_right, str):
+                    margin_right = 0 if margin_right == 'auto' else float(margin_right)
+                if isinstance(padding_left, str):
+                    padding_left = 0 if padding_left == 'auto' else float(padding_left)
+                if isinstance(padding_right, str):
+                    padding_right = 0 if padding_right == 'auto' else float(padding_right)
+                if isinstance(border_left, str):
+                    border_left = 0 if border_left == 'auto' else float(border_left)
+                if isinstance(border_right, str):
+                    border_right = 0 if border_right == 'auto' else float(border_right)
+                
+                # Calculate total box model properties
+                total_margin = margin_left + margin_right
+                total_padding = padding_left + padding_right
+                total_border = border_left + border_right
+                
+                # Content width fills available space minus all box model properties
+                box.box_metrics.content_width = container_width - total_margin - total_padding - total_border
+            elif box.display == DisplayType.INLINE:
                 # Inline elements size to content
-                # For simplicity, we'll set a default width
-                box.box_metrics.width = 100
+                if box.element and hasattr(box.element, 'text_content') and box.element.text_content:
+                    # Calculate width based on text content
+                    text_length = len(box.element.text_content)
+                    font_size = self._parse_dimension(box.computed_style.get('font-size', '16px'))
+                    if isinstance(font_size, str):
+                        font_size = 16 if font_size == 'auto' else float(font_size)
+                    
+                    # Rough estimate: each character is about 0.6 times the font size width
+                    box.box_metrics.content_width = int(text_length * font_size * 0.6)
+                else:
+                    # Default minimum width for empty inline elements
+                    box.box_metrics.content_width = 10
+            else:  # inline-block or other display types
+                # For inline-block, try to size to content first
+                if box.element and hasattr(box.element, 'text_content') and box.element.text_content:
+                    text_length = len(box.element.text_content)
+                    font_size = self._parse_dimension(box.computed_style.get('font-size', '16px'))
+                    if isinstance(font_size, str):
+                        font_size = 16 if font_size == 'auto' else float(font_size)
+                    
+                    # Rough estimate: each character is about 0.6 times the font size width
+                    box.box_metrics.content_width = int(text_length * font_size * 0.6)
+                else:
+                    # If no content, use a reasonable default based on display type
+                    box.box_metrics.content_width = int(container_width * 0.8)  # 80% of container width
         
         # Layout based on display type
         if box.display == DisplayType.BLOCK:
-            return self._layout_block(box, container_width, container_height)
+            width, height = self._layout_block(box, container_width, container_height)
         elif box.display == DisplayType.INLINE:
-            return self._layout_inline(box, container_width, container_height)
+            width, height = self._layout_inline(box, container_width, container_height)
         elif box.display == DisplayType.FLEX:
-            return self._layout_flex(box, container_width, container_height)
+            width, height = self._layout_flex(box, container_width, container_height)
         else:
             # Default to block layout
-            return self._layout_block(box, container_width, container_height)
+            width, height = self._layout_block(box, container_width, container_height)
+        
+        # Calculate height if not explicitly set
+        if box.box_metrics.height is None or (isinstance(box.box_metrics.height, str) and box.box_metrics.height == 'auto'):
+            if box.children:
+                # Calculate height based on children
+                max_child_bottom = 0
+                for child in box.children:
+                    child_bottom = child.box_metrics.y + child.box_metrics.margin_box_height - box.box_metrics.y
+                    max_child_bottom = max(max_child_bottom, child_bottom)
+                
+                # Add padding and border to child height
+                padding_top = box.box_metrics.padding_top
+                padding_bottom = box.box_metrics.padding_bottom
+                border_top = box.box_metrics.border_top_width
+                border_bottom = box.box_metrics.border_bottom_width
+                
+                if isinstance(padding_top, str):
+                    padding_top = 0 if padding_top == 'auto' else float(padding_top)
+                if isinstance(padding_bottom, str):
+                    padding_bottom = 0 if padding_bottom == 'auto' else float(padding_bottom)
+                if isinstance(border_top, str):
+                    border_top = 0 if border_top == 'auto' else float(border_top)
+                if isinstance(border_bottom, str):
+                    border_bottom = 0 if border_bottom == 'auto' else float(border_bottom)
+                
+                box.box_metrics.content_height = max_child_bottom + padding_top + padding_bottom + border_top + border_bottom
+            elif box.element and hasattr(box.element, 'text_content') and box.element.text_content:
+                # Calculate height based on text content
+                font_size = self._parse_dimension(box.computed_style.get('font-size', '16px'))
+                if isinstance(font_size, str):
+                    font_size = 16 if font_size == 'auto' else float(font_size)
+                
+                line_height = self._parse_dimension(box.computed_style.get('line-height', '1.2'))
+                if isinstance(line_height, str):
+                    line_height = font_size * 1.2 if line_height == 'auto' else float(line_height)
+                
+                # Calculate how many lines the text might need
+                content_width = box.box_metrics.content_width
+                if isinstance(content_width, str):
+                    content_width = container_width if content_width == 'auto' else float(content_width)
+                
+                if content_width > 0:
+                    # Rough estimate: each character is about 0.6 times the font size width
+                    chars_per_line = int(content_width / (font_size * 0.6))
+                    if chars_per_line < 1:
+                        chars_per_line = 1
+                    
+                    text_length = len(box.element.text_content)
+                    num_lines = max(1, math.ceil(text_length / chars_per_line))
+                    
+                    box.box_metrics.content_height = int(num_lines * line_height)
+                else:
+                    # Default to one line if we can't calculate width
+                    box.box_metrics.content_height = int(line_height)
+            else:
+                # Empty element with no explicit height
+                # Ensure a minimum height based on tag type
+                tag_name = box.element.tag_name.lower() if hasattr(box.element, 'tag_name') else ''
+                
+                # Form elements should have a minimum height even if empty
+                if tag_name in ['input', 'button', 'select', 'textarea']:
+                    box.box_metrics.content_height = 24  # Minimum height for form elements
+                elif tag_name in ['div', 'span', 'p', 'a']:
+                    # Ensure non-zero height for container elements
+                    box.box_metrics.content_height = 16  # Minimum height for containers
+                else:
+                    # Default minimum height for any element
+                    box.box_metrics.content_height = 8
+        
+        # Update box dimensions
+        box._update_box_dimensions()
+        
+        return (box.box_metrics.border_box_width, box.box_metrics.border_box_height)
     
     def _calculate_box_dimensions(self, layout_box: LayoutBox, viewport_width: int, viewport_height: int) -> None:
         """
