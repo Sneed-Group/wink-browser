@@ -161,4 +161,3 @@ This project is licensed under the Sammy Public License - see the LICENSE file f
 - [Requests](https://requests.readthedocs.io/) for HTTP handling
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the UI 
 - [Python](https://python.org) for the programming language 
-
