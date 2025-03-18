@@ -7,17 +7,18 @@ import logging
 import os
 import re
 import tkinter as tk
+import urllib.request
+import urllib.parse
+import urllib.error
 from tkinter import ttk, Canvas, Text, PhotoImage, TclError, font as tkfont
 from typing import Dict, List, Optional, Tuple, Any, Union, Set, Callable
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import math
 import threading
 import queue
-import urllib.request
-import urllib.parse
-import urllib.error
 import base64
 import time
+import cairosvg
 
 from browser_engine.html5_engine.dom import element
 
@@ -1543,6 +1544,11 @@ class HTML5Renderer:
         Returns:
             PIL.Image.Image: The image object, or None if the image could not be loaded.
         """
+        import urllib.request
+        import urllib.parse
+        import urllib.error
+        from io import BytesIO
+        
         if not src:
             return None
             
@@ -1560,17 +1566,27 @@ class HTML5Renderer:
                     # Extract the base64 data
                     header, encoded = src.split(',', 1)
                     import base64
-                    from io import BytesIO
+                    
+                    # Check if it's an SVG
+                    is_svg = 'svg+xml' in header.lower()
                     
                     # Decode the image data
                     decoded = base64.b64decode(encoded)
-                    image = Image.open(BytesIO(decoded))
+                    
+                    if is_svg:
+                        # Convert SVG to PNG using cairosvg
+                        import cairosvg
+                        png_data = cairosvg.svg2png(bytestring=decoded)
+                        image = Image.open(BytesIO(png_data))
+                    else:
+                        image = Image.open(BytesIO(decoded))
+                    
                     self.image_cache[src] = image
                     return image
                 except Exception as e:
                     logger.error(f"Failed to decode data URL: {e}")
                     return None
-                    
+            
             # Get base URL - try multiple sources to ensure we get the correct one
             # Initialize base_url
             base_url = ""
@@ -1589,212 +1605,121 @@ class HTML5Renderer:
                     current_url = self.document.url
                     logger.debug(f"Found current URL from document: {current_url}")
             
-            # If no URL from document, try to get from engine
-            if not current_url and hasattr(self, 'html5_engine'):
-                if hasattr(self.html5_engine, 'current_url') and self.html5_engine.current_url:
-                    current_url = self.html5_engine.current_url
-                    logger.debug(f"Found current URL from engine.current_url: {current_url}")
-                elif hasattr(self.html5_engine, 'base_url') and self.html5_engine.base_url:
-                    current_url = self.html5_engine.base_url
-                    logger.debug(f"Found current URL from engine.base_url: {current_url}")
-            
-            # Extract base URL from current URL using regex
-            if current_url:
-                # Use urllib.parse instead of regex for more robust URL handling
-                import urllib.parse
+            # Parse the current URL to get base components
+            try:
                 parsed_url = urllib.parse.urlparse(current_url)
-                
-                # Get the origin (scheme + netloc)
                 origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+            except Exception as e:
+                logger.error(f"Error parsing URL {current_url}: {e}")
+                origin = ""
+            
+            # For absolute paths, we'll use the origin
+            if src.startswith('/'):
+                # Use urljoin to properly handle the path
+                full_url = urllib.parse.urljoin(origin, src)
+                logger.debug(f"Resolved absolute path against origin: {full_url}")
                 
-                # For absolute paths, we'll use the origin
-                if src.startswith('/'):
-                    # Use urljoin to properly handle the path
-                    full_url = urllib.parse.urljoin(origin, src)
-                    logger.debug(f"Resolved absolute path against origin: {full_url}")
-                    
-                    # Try to load the image from the full URL
-                    try:
-                        # Use network manager if available
-                        if self.network_manager:
-                            logger.info(f"Using network manager to fetch: {full_url}")
-                            response = self.network_manager.get(full_url)
-                            if response and response.content:
-                                from io import BytesIO
-                                image = Image.open(BytesIO(response.content))
-                                self.image_cache[src] = image
-                                return image
-                        
-                        # Fallback to direct request
-                        logger.info(f"Falling back to direct request: {full_url}")
-                        import urllib.request
-                        from io import BytesIO
-                        
-                        with urllib.request.urlopen(full_url) as response:
-                            image_data = response.read()
-                            image = Image.open(BytesIO(image_data))
-                            self.image_cache[src] = image
-                            return image
-                    except urllib.error.HTTPError as e:
-                        if e.code == 404:
-                            logger.info(f"404 error for {full_url}, trying alternative URL formats")
-                            # Try alternative URL formats
-                            alternative_urls = []
-                            
-                            # If URL has www, try without it
-                            if 'www.' in full_url:
-                                alternative_urls.append(full_url.replace('www.', ''))
-                            
-                            # If URL doesn't have www, try with it
-                            if not 'www.' in full_url:
-                                scheme, rest = full_url.split('://')
-                                alternative_urls.append(f"{scheme}://www.{rest}")
-                            
-                            # Try removing subdomain if present
-                            if '.' in parsed_url.netloc and not parsed_url.netloc.startswith('www.'):
-                                netloc_parts = parsed_url.netloc.split('.')
-                                if len(netloc_parts) > 2:
-                                    alternative_urls.append(f"{parsed_url.scheme}://{'.'.join(netloc_parts[1:])}{parsed_url.path}")
-                            
-                            # Try each alternative URL
-                            for alt_url in alternative_urls:
-                                try:
-                                    logger.info(f"Trying alternative URL: {alt_url}")
-                                    if self.network_manager:
-                                        response = self.network_manager.get(alt_url)
-                                        if response and response.content:
-                                            image = Image.open(BytesIO(response.content))
-                                            self.image_cache[src] = image
-                                            return image
-                                    
-                                    with urllib.request.urlopen(alt_url) as response:
-                                        image_data = response.read()
-                                        image = Image.open(BytesIO(image_data))
-                                        self.image_cache[src] = image
-                                        return image
-                                except Exception as alt_e:
-                                    logger.debug(f"Failed to load from alternative URL {alt_url}: {alt_e}")
-                                    continue
-                            
-                            logger.error(f"All alternative URLs failed for {full_url}")
-                        else:
-                            logger.error(f"HTTP error {e.code} for URL {full_url}: {e}")
-                    except Exception as e:
-                        logger.error(f"Failed to load image from URL {full_url}: {e}")
-                        # Continue with other methods if this fails
-                else:
-                    # For relative paths, we'll use the directory of the current URL as base
-                    path_parts = parsed_url.path.split('/')
-                    if '.' in path_parts[-1]:  # If the last part looks like a file
-                        path_parts.pop()  # Remove the file part
-                    
-                    # Reconstruct the base URL for relative paths
-                    path = '/'.join(path_parts)
-                    if not path.endswith('/'):
-                        path += '/'
-                        
-                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
-                    full_url = urllib.parse.urljoin(base_url, src)
-                    logger.debug(f"Resolved relative path against directory: {full_url}")
-                    
-                    # Try to load the image from the full URL
-                    try:
-                        # Use network manager if available
-                        if self.network_manager:
-                            logger.info(f"Using network manager to fetch: {full_url}")
-                            response = self.network_manager.get(full_url)
-                            if response and response.content:
-                                from io import BytesIO
-                                image = Image.open(BytesIO(response.content))
-                                self.image_cache[src] = image
-                                return image
-                        
-                        # Fallback to direct request
-                        logger.info(f"Falling back to direct request: {full_url}")
-                        import urllib.request
-                        from io import BytesIO
-                        
-                        with urllib.request.urlopen(full_url) as response:
-                            image_data = response.read()
-                            image = Image.open(BytesIO(image_data))
-                            self.image_cache[src] = image
-                            return image
-                    except urllib.error.HTTPError as e:
-                        if e.code == 404:
-                            logger.info(f"404 error for {full_url}, trying alternative URL formats")
-                            # Try alternative URL formats
-                            alternative_urls = []
-                            
-                            # If URL has www, try without it
-                            if 'www.' in full_url:
-                                alternative_urls.append(full_url.replace('www.', ''))
-                            
-                            # If URL doesn't have www, try with it
-                            if not 'www.' in full_url:
-                                scheme, rest = full_url.split('://')
-                                alternative_urls.append(f"{scheme}://www.{rest}")
-                            
-                            # Try removing subdomain if present
-                            if '.' in parsed_url.netloc and not parsed_url.netloc.startswith('www.'):
-                                netloc_parts = parsed_url.netloc.split('.')
-                                if len(netloc_parts) > 2:
-                                    alternative_urls.append(f"{parsed_url.scheme}://{'.'.join(netloc_parts[1:])}{parsed_url.path}")
-                            
-                            # Try each alternative URL
-                            for alt_url in alternative_urls:
-                                try:
-                                    logger.info(f"Trying alternative URL: {alt_url}")
-                                    if self.network_manager:
-                                        response = self.network_manager.get(alt_url)
-                                        if response and response.content:
-                                            image = Image.open(BytesIO(response.content))
-                                            self.image_cache[src] = image
-                                            return image
-                                    
-                                    with urllib.request.urlopen(alt_url) as response:
-                                        image_data = response.read()
-                                        image = Image.open(BytesIO(image_data))
-                                        self.image_cache[src] = image
-                                        return image
-                                except Exception as alt_e:
-                                    logger.debug(f"Failed to load from alternative URL {alt_url}: {alt_e}")
-                                    continue
-                            
-                            logger.error(f"All alternative URLs failed for {full_url}")
-                        else:
-                            logger.error(f"HTTP error {e.code} for URL {full_url}: {e}")
-                    except Exception as e:
-                        logger.error(f"Failed to load image from URL {full_url}: {e}")
-            
-            logger.debug(f"Determined base URL: {base_url}")
-            
-            # If we haven't already tried to load from a URL above, try now with full_url
-            if full_url.startswith(('http://', 'https://')) and full_url != src:
+                # Try to load the image from the full URL
                 try:
-                    # Try to use the network manager if available
+                    # Use network manager if available
                     if self.network_manager:
                         logger.info(f"Using network manager to fetch: {full_url}")
                         response = self.network_manager.get(full_url)
                         if response and response.content:
-                            from io import BytesIO
-                            image = Image.open(BytesIO(response.content))
+                            # Check if it's an SVG
+                            content_type = response.headers.get('Content-Type', '').lower()
+                            is_svg = 'svg+xml' in content_type
+                            
+                            if is_svg:
+                                # Convert SVG to PNG using cairosvg
+                                import cairosvg
+                                png_data = cairosvg.svg2png(bytestring=response.content)
+                                image = Image.open(BytesIO(png_data))
+                            else:
+                                image = Image.open(BytesIO(response.content))
+                            
                             self.image_cache[src] = image
                             return image
                     
                     # Fallback to direct request
                     logger.info(f"Falling back to direct request: {full_url}")
-                    import urllib.request
-                    from io import BytesIO
                     
                     with urllib.request.urlopen(full_url) as response:
                         image_data = response.read()
-                        image = Image.open(BytesIO(image_data))
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        is_svg = 'svg+xml' in content_type
+                        
+                        if is_svg:
+                            # Convert SVG to PNG using cairosvg
+                            import cairosvg
+                            png_data = cairosvg.svg2png(bytestring=image_data)
+                            image = Image.open(BytesIO(png_data))
+                        else:
+                            image = Image.open(BytesIO(image_data))
+                        
+                        self.image_cache[src] = image
+                        return image
+                except Exception as e:
+                    logger.error(f"Failed to load image from URL {full_url}: {e}")
+            else:
+                # For relative paths, we'll use the directory of the current URL as base
+                path_parts = parsed_url.path.split('/')
+                if '.' in path_parts[-1]:  # If the last part looks like a file
+                    path_parts.pop()  # Remove the file part
+                
+                # Reconstruct the base URL for relative paths
+                path = '/'.join(path_parts)
+                if not path.endswith('/'):
+                    path += '/'
+                    
+                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
+                full_url = urllib.parse.urljoin(base_url, src)
+                logger.debug(f"Resolved relative path against directory: {full_url}")
+                
+                # Try to load the image from the full URL
+                try:
+                    # Use network manager if available
+                    if self.network_manager:
+                        logger.info(f"Using network manager to fetch: {full_url}")
+                        response = self.network_manager.get(full_url)
+                        if response and response.content:
+                            # Check if it's an SVG
+                            content_type = response.headers.get('Content-Type', '').lower()
+                            is_svg = 'svg+xml' in content_type
+                            
+                            if is_svg:
+                                # Convert SVG to PNG using cairosvg
+                                import cairosvg
+                                png_data = cairosvg.svg2png(bytestring=response.content)
+                                image = Image.open(BytesIO(png_data))
+                            else:
+                                image = Image.open(BytesIO(response.content))
+                            
+                            self.image_cache[src] = image
+                            return image
+                    
+                    # Fallback to direct request
+                    logger.info(f"Falling back to direct request: {full_url}")
+                    
+                    with urllib.request.urlopen(full_url) as response:
+                        image_data = response.read()
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        is_svg = 'svg+xml' in content_type
+                        
+                        if is_svg:
+                            # Convert SVG to PNG using cairosvg
+                            import cairosvg
+                            png_data = cairosvg.svg2png(bytestring=image_data)
+                            image = Image.open(BytesIO(png_data))
+                        else:
+                            image = Image.open(BytesIO(image_data))
+                        
                         self.image_cache[src] = image
                         return image
                 except Exception as e:
                     logger.error(f"Failed to load image from URL {full_url}: {e}")
             
-            # Last resort: try local files (this is unlikely to work for web pages but might for local files)
+            # Last resort: try local files
             logger.warning("Remote image loading failed, attempting local file paths as last resort")
             try:
                 # Try different possible paths
@@ -1813,7 +1738,19 @@ class HTML5Renderer:
                 for path in paths_to_try:
                     logger.info(f"Trying path: {path}")
                     if os.path.exists(path):
-                        image = Image.open(path)
+                        # Check if it's an SVG file
+                        is_svg = path.lower().endswith('.svg')
+                        
+                        if is_svg:
+                            # Convert SVG to PNG using cairosvg
+                            import cairosvg
+                            with open(path, 'rb') as f:
+                                svg_data = f.read()
+                            png_data = cairosvg.svg2png(bytestring=svg_data)
+                            image = Image.open(BytesIO(png_data))
+                        else:
+                            image = Image.open(path)
+                        
                         self.image_cache[src] = image
                         return image
                 
