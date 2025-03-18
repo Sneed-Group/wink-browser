@@ -683,8 +683,8 @@ class Element(Node):
                 # Divs have minimal default styling
                 pass
             elif tag == 'p':
-                default_styles['margin-top'] = '1em'
-                default_styles['margin-bottom'] = '1em'
+                default_styles['margin-top'] = '0.5em'
+                default_styles['margin-bottom'] = '0.5em'
             
             # Headings
             elif tag.startswith('h') and len(tag) == 2 and tag[1].isdigit():
@@ -694,8 +694,8 @@ class Element(Node):
                     sizes = ['2em', '1.5em', '1.17em', '1em', '0.83em', '0.67em']
                     default_styles['font-size'] = sizes[heading_level - 1]
                     default_styles['font-weight'] = 'bold'
-                    default_styles['margin-top'] = '0.67em'
-                    default_styles['margin-bottom'] = '0.67em'
+                    default_styles['margin-top'] = '0.33em'
+                    default_styles['margin-bottom'] = '0.33em'
         
         # List elements
         if tag == 'li':

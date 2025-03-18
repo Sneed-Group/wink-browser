@@ -60,13 +60,13 @@ class TkRenderer:
             wrap=tk.WORD,
             yscrollcommand=self.v_scrollbar.set,
             xscrollcommand=self.h_scrollbar.set,
-            padx=15,
-            pady=15,
+            padx=8,     # Reduced from 15
+            pady=8,     # Reduced from 15
             font=("Arial", int(12 * self.zoom_level)),
-            spacing1=8,    # More aggressive spacing between lines
-            spacing2=2,    # Added spacing within lines
-            spacing3=8,    # More spacing after paragraphs
-            exportselection=0  # Prevent selection conflicts
+            spacing1=0,  # Reduced from 2
+            spacing2=0,  # Reduced from 1
+            spacing3=0,  # Reduced from 2
+            exportselection=0
         )
         self.content_view.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
@@ -104,9 +104,9 @@ class TkRenderer:
         heading2_size = int(20 * self.zoom_level)
         heading3_size = int(16 * self.zoom_level)
         
-        # Larger line spacing calculation to prevent overlaps
+        # Reduced line spacing calculation
         def calc_spacing(font_size):
-            return int(font_size * 1.2)  # Increased spacing multiplier
+            return int(font_size * 1.0)  # Reduced from 1.05 to remove extra spacing
         
         # Configure base tags for element types
         self.content_view.tag_configure(
@@ -373,14 +373,14 @@ class TkRenderer:
         self.content_view.tag_configure(
             unique_tag,
             font=("Arial", font_size, "bold"),
-            spacing1=int(font_size * 1.2),
-            spacing3=int(font_size * 1.2),
+            spacing1=calc_spacing(font_size),
+            spacing3=calc_spacing(font_size),
             lmargin1=0,
             lmargin2=0
         )
         
-        # Add spacing before heading
-        self.content_view.insert(tk.END, "\n\n")
+        # Add minimal spacing before heading
+        self.content_view.insert(tk.END, "\n")
         
         # Get current position for tag application
         current_line = self.content_view.index(tk.INSERT).split('.')[0]
@@ -393,8 +393,8 @@ class TkRenderer:
         # Get end position
         end_index = self.content_view.index(tk.INSERT)
         
-        # Add spacing after heading
-        self.content_view.insert(tk.END, "\n\n")
+        # Add minimal spacing after heading
+        self.content_view.insert(tk.END, "\n")
         
         # Apply the unique tag
         self.content_view.tag_add(unique_tag, start_index, end_index)
@@ -415,14 +415,11 @@ class TkRenderer:
         self.content_view.tag_configure(
             tag_name,
             font=("Arial", int(12 * self.zoom_level)),
-            spacing1=int(12 * self.zoom_level * 1.2),
-            spacing3=int(12 * self.zoom_level * 1.2),
+            spacing1=int(12 * self.zoom_level * 1.0),  # Reduced from 1.05
+            spacing3=int(12 * self.zoom_level * 1.0),  # Reduced from 1.05
             lmargin1=0,
             lmargin2=0
         )
-        
-        # Add spacing before paragraph on a separate line
-        self.content_view.insert(tk.END, "\n")
         
         # Start the paragraph on a fresh line
         current_line = self.content_view.index(tk.INSERT).split('.')[0]
@@ -442,7 +439,7 @@ class TkRenderer:
         current_pos = self.content_view.index(tk.INSERT)
         end_index = current_pos
         
-        # Add spacing after paragraph on a separate line
+        # Add minimal spacing after paragraph
         self.content_view.insert(tk.END, "\n")
         
         # Only apply tag if there was content
@@ -521,17 +518,9 @@ class TkRenderer:
         Args:
             element: Div element
         """
-        # Insert a newline before div to ensure proper spacing
-        current_pos = self.content_view.index(tk.INSERT)
-        if not current_pos.endswith('.0'):  # If not already at line start
-            self.content_view.insert(tk.END, '\n')
-            
         # Process children
         for child in element.children:
             self._render_element(child)
-        
-        # Insert a newline after div to ensure proper spacing
-        self.content_view.insert(tk.END, '\n')
     
     def _render_formatted_text(self, element, tag: str) -> None:
         """

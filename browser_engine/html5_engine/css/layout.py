@@ -519,39 +519,39 @@ class LayoutEngine:
         
         # Base spacing for different element types
         base_spacing = {
-            'h1': 40,
-            'h2': 35,
-            'h3': 30,
-            'h4': 25,
-            'h5': 20,
-            'h6': 15,
-            'p': 20,
-            'div': 15,
-            'pre': 25,
-            'a': 10,
-            'span': 5
+            'h1': 5,   # Reduced from 10
+            'h2': 4,   # Reduced from 9
+            'h3': 3,   # Reduced from 8
+            'h4': 3,   # Reduced from 7
+            'h5': 2,   # Reduced from 6
+            'h6': 2,   # Reduced from 5
+            'p': 2,    # Reduced from 5
+            'div': 1,  # Reduced from 4
+            'pre': 2,  # Reduced from 6
+            'a': 0,    # Reduced from 2
+            'span': 0  # Reduced from 1
         }
         
         # Get base spacing for current element
-        spacing = base_spacing.get(current_tag, 10)
+        spacing = base_spacing.get(current_tag, 1)  # Reduced default from 2 to 1
         
         # Adjust spacing based on previous element
         if prev_tag:
             # Add extra spacing between text blocks
             if prev_tag in ['p', 'pre', 'div'] and current_tag in ['p', 'pre', 'div']:
-                spacing += 10
+                spacing += 1  # Reduced from 2
             
             # Add extra spacing before headings
             if current_tag.startswith('h') and len(current_tag) == 2:
-                spacing += 15
+                spacing += 2  # Reduced from 4
             
             # Add extra spacing after headings
             if prev_tag.startswith('h') and len(prev_tag) == 2:
-                spacing += 10
-                
+                spacing += 1  # Reduced from 2
+            
             # Reduce spacing between inline elements
             if prev_tag in ['a', 'span'] and current_tag in ['a', 'span']:
-                spacing = 5
+                spacing = 1
         
         return spacing
 
@@ -833,61 +833,61 @@ class LayoutEngine:
         # Add tag-specific defaults with increased vertical spacing
         if tag_name == 'body':
             defaults.update({
-                'margin-top': '24px',
-                'margin-right': '24px',
-                'margin-bottom': '24px',
-                'margin-left': '24px',
-                'line-height': '1.6',  # Increased line height for better readability
+                'margin-top': '8px',     # Reduced from 24px
+                'margin-right': '8px',   # Reduced from 24px
+                'margin-bottom': '8px',  # Reduced from 24px
+                'margin-left': '8px',    # Reduced from 24px
+                'line-height': '1.2',    # Reduced from 1.6
             })
         # Block elements
         elif tag_name == 'div':
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
+                'margin-top': '0.3em',    # Reduced from 1.5em
+                'margin-bottom': '0.3em',  # Reduced from 1.5em
             })
         elif tag_name == 'p':
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
-                'line-height': '1.7',  # More line height for paragraphs
+                'margin-top': '0.3em',    # Reduced from 1.5em
+                'margin-bottom': '0.3em',  # Reduced from 1.5em
+                'line-height': '1.2',     # Reduced from 1.7
             })
-        # Headings with progressively smaller margins as the level increases
+        # Headings with progressively smaller margins
         elif tag_name == 'h1':
             defaults.update({
-                'margin-top': '2.5em',
-                'margin-bottom': '1.2em',
-                'line-height': '1.3',  # Headings need less line height
+                'margin-top': '0.5em',    # Reduced from 2.5em
+                'margin-bottom': '0.3em',  # Reduced from 1.2em
+                'line-height': '1.1',      # Reduced from 1.3
             })
         elif tag_name == 'h2':
             defaults.update({
-                'margin-top': '2.2em',
-                'margin-bottom': '1.1em',
-                'line-height': '1.3',
+                'margin-top': '0.4em',    # Reduced from 2.2em
+                'margin-bottom': '0.3em',  # Reduced from 1.1em
+                'line-height': '1.1',      # Reduced from 1.3
             })
         elif tag_name == 'h3':
             defaults.update({
-                'margin-top': '2em',
-                'margin-bottom': '1em',
-                'line-height': '1.3',
+                'margin-top': '0.3em',    # Reduced from 2em
+                'margin-bottom': '0.2em',  # Reduced from 1em
+                'line-height': '1.1',      # Reduced from 1.3
             })
         elif tag_name in ('h4', 'h5', 'h6'):
             defaults.update({
-                'margin-top': '1.8em',
-                'margin-bottom': '0.9em',
-                'line-height': '1.3',
+                'margin-top': '0.2em',    # Reduced from 1.8em
+                'margin-bottom': '0.2em',  # Reduced from 0.9em
+                'line-height': '1.1',      # Reduced from 1.3
             })
         # Lists
         elif tag_name in ('ul', 'ol'):
             defaults.update({
-                'margin-top': '1.5em',
-                'margin-bottom': '1.5em',
-                'padding-left': '40px',  # Add left padding for list indentation
+                'margin-top': '0.3em',    # Reduced from 1.5em
+                'margin-bottom': '0.3em',  # Reduced from 1.5em
+                'padding-left': '20px',    # Reduced from 40px
             })
         elif tag_name == 'li':
             defaults.update({
-                'margin-top': '0.8em',
-                'margin-bottom': '0.8em',
-                'line-height': '1.6',  # Better spacing for list items
+                'margin-top': '0.1em',    # Reduced from 0.8em
+                'margin-bottom': '0.1em',  # Reduced from 0.8em
+                'line-height': '1.2',      # Reduced from 1.6
             })
         # Table elements
         elif tag_name == 'table':
