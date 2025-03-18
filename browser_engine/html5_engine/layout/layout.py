@@ -16,7 +16,7 @@ class LayoutBox:
     DEFAULT_HEADING_MARGIN = 24  # Larger spacing for headings
     DEFAULT_PARAGRAPH_MARGIN = 16  # Standard paragraph spacing
     DEFAULT_LIST_ITEM_MARGIN = 8  # Spacing between list items
-    DEFAULT_INLINE_MARGIN = 4  # Small spacing between inline elements
+    DEFAULT_INLINE_MARGIN = 12  # Significantly increased spacing between inline elements to prevent merging
     
     def __init__(self, element=None, display: str = 'block', parent=None):
         """
@@ -401,65 +401,59 @@ class LayoutBox:
     
     def layout(self, container_width: int, x: int = 0, y: int = 0) -> None:
         """
-        Perform layout for this box and its children.
+        Layout this box and its children.
         
         Args:
             container_width: Width of the containing block
-            x: Starting x position
-            y: Starting y position
+            x: X position in parent
+            y: Y position in parent
         """
-        # Set initial position
+        # Set position
         self.box_metrics.x = x
         self.box_metrics.y = y
         
-        # Calculate dimensions based on styles
-        self._calculate_width(container_width)
-        self._calculate_height()
-        
-        # Apply position if set
-        position = self.computed_style.get('position', 'static')
-        
-        if position == 'relative':
-            # Adjust position relative to normal flow
-            left = self._parse_dimension_value(self.computed_style.get('left', '0'))
-            top = self._parse_dimension_value(self.computed_style.get('top', '0'))
-            
-            if isinstance(left, int):
-                self.box_metrics.x += left
-            if isinstance(top, int):
-                self.box_metrics.y += top
-        elif position == 'absolute':
-            # Position relative to nearest positioned ancestor
-            # For simplicity, we're positioning relative to the viewport
-            left = self._parse_dimension_value(self.computed_style.get('left', '0'))
-            top = self._parse_dimension_value(self.computed_style.get('top', '0'))
-            
-            if isinstance(left, int):
-                self.box_metrics.x = left
-            if isinstance(top, int):
-                self.box_metrics.y = top
-        elif position == 'fixed':
-            # Position relative to viewport
-            left = self._parse_dimension_value(self.computed_style.get('left', '0'))
-            top = self._parse_dimension_value(self.computed_style.get('top', '0'))
-            
-            if isinstance(left, int):
-                self.box_metrics.x = left
-            if isinstance(top, int):
-                self.box_metrics.y = top
-        
         # Layout based on display type
         if self.display == 'block':
-            self._layout_block(container_width)
-        elif self.display == 'inline':
-            self._layout_inline(container_width)
-        elif self.display == 'inline-block':
-            self._layout_inline_block(container_width)
-        elif self.display == 'flex':
-            self._layout_flex(container_width)
+            # Block elements take full width of their container by default
+            if self.box_metrics.width is None or self.box_metrics.width == 'auto':
+                self.box_metrics.width = container_width
+                
+            # Calculate content width
+            self._calculate_width(container_width)
             
-        # Sort children by z-index for proper rendering order
-        self.children.sort(key=lambda child: child.z_index)
+            # Layout as block
+            self._layout_block(container_width)
+            
+            # Calculate height
+            self._calculate_height()
+            
+        elif self.display == 'inline-block':
+            # Inline-block elements behave like inline elements externally
+            # but like block elements internally
+            self._calculate_width(container_width)
+            self._layout_inline_block(container_width)
+            self._calculate_height()
+            
+        elif self.display == 'inline':
+            # Inline elements are sized to their content
+            self._calculate_width(container_width)
+            self._layout_inline(container_width)
+            self._calculate_height()
+            
+        elif self.display == 'flex':
+            # Flexbox layout
+            self._calculate_width(container_width)
+            self._layout_flex(container_width)
+            self._calculate_height()
+            
+        else:
+            # Default to block layout
+            if self.box_metrics.width is None or self.box_metrics.width == 'auto':
+                self.box_metrics.width = container_width
+                
+            self._calculate_width(container_width)
+            self._layout_block(container_width)
+            self._calculate_height()
     
     def _calculate_width(self, container_width: int) -> None:
         """
@@ -656,86 +650,62 @@ class LayoutBox:
         Args:
             container_width: Width of the containing block
         """
-        # Get all values before arithmetic operations
-        margin_top = self.box_metrics.margin_top
-        margin_left = self.box_metrics.margin_left
-        border_top = self.box_metrics.border_top_width
-        border_left = self.box_metrics.border_left_width
-        padding_top = self.box_metrics.padding_top
-        padding_left = self.box_metrics.padding_left
-        content_width = self.box_metrics.content_width
+        # Convert padding to numeric values first
+        padding_left = self._parse_dimension_value(self.box_metrics.padding_left)
+        padding_right = self._parse_dimension_value(self.box_metrics.padding_right)
+        padding_top = self._parse_dimension_value(self.box_metrics.padding_top)
         
-        # Convert string values to float, handling 'auto' as 0
-        if isinstance(margin_top, str):
-            margin_top = 0 if margin_top == 'auto' else float(margin_top)
-        if isinstance(margin_left, str):
-            margin_left = 0 if margin_left == 'auto' else float(margin_left)
-        if isinstance(border_top, str):
-            border_top = 0 if border_top == 'auto' else float(border_top)
-        if isinstance(border_left, str):
-            border_left = 0 if border_left == 'auto' else float(border_left)
-        if isinstance(padding_top, str):
-            padding_top = 0 if padding_top == 'auto' else float(padding_top)
+        # Convert string values to float for safety
         if isinstance(padding_left, str):
             padding_left = 0 if padding_left == 'auto' else float(padding_left)
-        if isinstance(content_width, str):
-            content_width = 0 if content_width == 'auto' else float(content_width)
+        if isinstance(padding_right, str):
+            padding_right = 0 if padding_right == 'auto' else float(padding_right)
+        if isinstance(padding_top, str):
+            padding_top = 0 if padding_top == 'auto' else float(padding_top)
         
-        # Calculate the starting position for content
-        content_x = self.box_metrics.x + margin_left + border_left + padding_left
-        content_y = self.box_metrics.y + margin_top + border_top + padding_top
-        
-        # Available width for children
+        # Calculate content width
         if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
-            margin_right = self.box_metrics.margin_right
-            if isinstance(margin_right, str):
-                margin_right = 0 if margin_right == 'auto' else float(margin_right)
-            child_container_width = container_width - margin_left - margin_right - border_left - padding_left
-            if isinstance(self.box_metrics.border_right_width, str):
-                border_right = 0 if self.box_metrics.border_right_width == 'auto' else float(self.box_metrics.border_right_width)
-            else:
-                border_right = self.box_metrics.border_right_width
-            if isinstance(self.box_metrics.padding_right, str):
-                padding_right = 0 if self.box_metrics.padding_right == 'auto' else float(self.box_metrics.padding_right)
-            else:
-                padding_right = self.box_metrics.padding_right
-            child_container_width -= (border_right + padding_right)
-        else:
-            child_container_width = content_width
+            # For auto width, use container width minus padding
+            self.box_metrics.content_width = container_width - padding_left - padding_right
+            self._update_box_dimensions()
         
-        # Current y position for laying out children
-        current_y = content_y
-        max_child_width = 0
+        # Ensure block elements take the full width available to them
+        # This is crucial for proper vertical stacking
+        if self.box_metrics.width is None or self.box_metrics.width == 'auto':
+            self.box_metrics.width = container_width
+            
+        # Process children
+        content_x = self.box_metrics.x + padding_left
+        content_y = self.box_metrics.y + padding_top  # Using converted padding_top
         
-        # Layout children
+        # Layout children in a block formation (stacked vertically)
         for child in self.children:
-            # Position child at current_y
-            child.layout(child_container_width, content_x, current_y)
+            # Always position block children at the left edge of content box
+            child_x = content_x
             
-            # Update maximum child width
-            child_margin_box_width = child.box_metrics.margin_box_width
-            if isinstance(child_margin_box_width, str):
-                child_margin_box_width = 0 if child_margin_box_width == 'auto' else float(child_margin_box_width)
-            max_child_width = max(max_child_width, child_margin_box_width)
+            # Layout the child
+            child.layout(self.box_metrics.content_width, child_x, content_y)
             
-            # Get child's margin box height
-            child_margin_box_height = child.box_metrics.margin_box_height
-            if isinstance(child_margin_box_height, str):
-                child_margin_box_height = 0 if child_margin_box_height == 'auto' else float(child_margin_box_height)
+            # Move down by the child's height for vertical stacking
+            if child.box_metrics.margin_box_height is not None:
+                if isinstance(child.box_metrics.margin_box_height, str):
+                    if child.box_metrics.margin_box_height == 'auto':
+                        child_height = 0  # Default height if auto
+                    else:
+                        try:
+                            child_height = float(child.box_metrics.margin_box_height)
+                        except (ValueError, TypeError):
+                            child_height = 0
+                else:
+                    child_height = float(child.box_metrics.margin_box_height)
+                    
+                # Move content_y down by the child's height to stack next child
+                content_y += child_height + 5  # Add small extra spacing between block children
             
-            # Move down by the child's total height (including margins)
-            current_y += child_margin_box_height
-        
-        # Update content width if it was auto
-        if isinstance(self.box_metrics.content_width, str) and self.box_metrics.content_width == 'auto':
-            self.box_metrics.content_width = max_child_width
-            self._update_box_dimensions()
-        
-        # Update content height based on last child's position
-        if isinstance(self.box_metrics.content_height, str) and self.box_metrics.content_height == 'auto':
-            total_height = current_y - content_y
-            self.box_metrics.content_height = total_height
-            self._update_box_dimensions()
+        # Update height based on children if auto
+        if self.box_metrics.height is None or self.box_metrics.height == 'auto':
+            if content_y > self.box_metrics.y + self.box_metrics.padding_top:
+                self.box_metrics.height = content_y - self.box_metrics.y
     
     def _layout_inline(self, container_width: int) -> None:
         """
@@ -770,6 +740,9 @@ class LayoutBox:
         content_x = self.box_metrics.x + margin_left + border_left + padding_left
         content_y = self.box_metrics.y + margin_top + border_top + padding_top
         
+        # Minimum space between inline elements
+        min_inline_spacing = self.DEFAULT_INLINE_MARGIN
+        
         # Layout children (simplified for now)
         for child in self.children:
             child.layout(container_width, content_x, content_y)
@@ -779,8 +752,31 @@ class LayoutBox:
             if isinstance(child_margin_box_width, str):
                 child_margin_box_width = 0 if child_margin_box_width == 'auto' else float(child_margin_box_width)
             
-            # Move right for next child
-            content_x += child_margin_box_width
+            # Calculate spacing (margins or minimum inline spacing)
+            child_margins = 0
+            if hasattr(child.box_metrics, 'margin_left') and hasattr(child.box_metrics, 'margin_right'):
+                # Get numeric values for margins
+                left_margin = child.box_metrics.margin_left
+                right_margin = child.box_metrics.margin_right
+                
+                # Convert to numbers if needed
+                if isinstance(left_margin, str):
+                    left_margin = 0 if left_margin == 'auto' else float(left_margin)
+                if isinstance(right_margin, str):
+                    right_margin = 0 if right_margin == 'auto' else float(right_margin)
+                    
+                child_margins = left_margin + right_margin
+                
+            # Apply minimum spacing if the element doesn't have sufficient margins
+            spacing = max(child_margins, min_inline_spacing)
+            
+            # Move right for next child - ensure additional spacing between elements
+            # Make sure we're working with numeric values
+            if isinstance(child_margin_box_width, (int, float)) and isinstance(spacing, (int, float)):
+                content_x += child_margin_box_width + (spacing - child_margins) + 5  # Add 5px extra spacing to prevent merging
+            else:
+                # Fallback if types are mixed
+                content_x += 5  # Minimum safe spacing
     
     def _layout_inline_block(self, container_width: int) -> None:
         """

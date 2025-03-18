@@ -675,18 +675,21 @@ class Element(Node):
         tag = self.tag_name.lower()
         
         # Block elements
-        if tag in ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'form', 'article', 'section']:
+        if tag in ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'form', 'article', 'section',
+                  'header', 'footer', 'nav', 'aside', 'main', 'figure', 'figcaption', 'blockquote', 'pre', 'address',
+                  'hr', 'fieldset', 'noscript', 'canvas', 'dl', 'dt', 'dd', 'details', 'summary']:
             default_styles['display'] = 'block'
             
             # Different margins for different block elements
             if tag == 'div':
-                # Divs have minimal default styling
-                pass
+                # Divs have minimal default styling, but still need some spacing
+                default_styles['margin-top'] = '5px'
+                default_styles['margin-bottom'] = '5px'
             elif tag == 'p':
-                default_styles['margin-top'] = '0.5em'
-                default_styles['margin-bottom'] = '0.5em'
+                default_styles['margin-top'] = '1em'
+                default_styles['margin-bottom'] = '1em'
             
-            # Headings
+            # Headings need substantial spacing
             elif tag.startswith('h') and len(tag) == 2 and tag[1].isdigit():
                 heading_level = int(tag[1])
                 if 1 <= heading_level <= 6:
@@ -694,8 +697,8 @@ class Element(Node):
                     sizes = ['2em', '1.5em', '1.17em', '1em', '0.83em', '0.67em']
                     default_styles['font-size'] = sizes[heading_level - 1]
                     default_styles['font-weight'] = 'bold'
-                    default_styles['margin-top'] = '0.33em'
-                    default_styles['margin-bottom'] = '0.33em'
+                    default_styles['margin-top'] = '0.67em'
+                    default_styles['margin-bottom'] = '0.67em'
         
         # List elements
         if tag == 'li':
