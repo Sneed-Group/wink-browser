@@ -10,11 +10,13 @@ A modern, privacy-focused web browser built in Python.
 - **Lightweight**: Efficient resource usage compared to mainstream browsers
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 - **Extension Support**: Support for securely sandboxed browser extensions
+- **Brand New Browser Engine**: Not anu existing browser engine of any kind.
+- **Freedom from big tech**: No influence from big tech.
 
 ## Components
 
 - **HTML Parser**: Efficient HTML parsing using BeautifulSoup and html5lib
-- **CSS Parser**: CSS parsing and styling with cssutils
+- **CSS Parser**: CSS parsing and styling with cssutils (WIP)
 - **JavaScript Engine**: JavaScript execution via dukpy (embedded JavaScript interpreter)
 - **Network Manager**: Handles HTTP requests, cookies, and caching
 - **Ad Blocker**: Blocks ads and trackers using filter lists
