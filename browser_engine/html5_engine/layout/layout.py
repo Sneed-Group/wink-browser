@@ -12,11 +12,16 @@ class LayoutBox:
     """
     
     # Default spacing constants
-    DEFAULT_BLOCK_MARGIN = 16  # Standard spacing between block elements
+    DEFAULT_BLOCK_MARGIN = 20  # Increased spacing between block elements
     DEFAULT_HEADING_MARGIN = 24  # Larger spacing for headings
     DEFAULT_PARAGRAPH_MARGIN = 16  # Standard paragraph spacing
     DEFAULT_LIST_ITEM_MARGIN = 8  # Spacing between list items
     DEFAULT_INLINE_MARGIN = 12  # Significantly increased spacing between inline elements to prevent merging
+    DEFAULT_DIV_MIN_HEIGHT = 20  # Minimum height for empty div elements
+    DEFAULT_TEXT_ELEMENT_MARGIN = 5  # Margin for text formatting elements
+    DEFAULT_FOOTER_MARGIN = 25  # Larger margin for footer elements
+    DEFAULT_MARQUEE_MARGIN = 15  # Margin for marquee elements
+    DEFAULT_COPYRIGHT_MARGIN = 20  # Margin for copyright elements
     
     def __init__(self, element=None, display: str = 'block', parent=None):
         """
@@ -52,16 +57,38 @@ class LayoutBox:
             elif tag_name == 'p':
                 self.box_metrics.margin_top = self.DEFAULT_PARAGRAPH_MARGIN
                 self.box_metrics.margin_bottom = self.DEFAULT_PARAGRAPH_MARGIN
-            elif tag_name in ('div', 'section', 'article', 'header', 'footer', 'nav', 'aside'):
+            elif tag_name == 'footer':
+                # Footer gets larger top margin to separate it from content
+                self.box_metrics.margin_top = self.DEFAULT_FOOTER_MARGIN
+                self.box_metrics.margin_bottom = self.DEFAULT_BLOCK_MARGIN
+            elif tag_name == 'marquee':
+                # Marquee element (obsolete but still supported by some browsers)
+                self.box_metrics.margin_top = self.DEFAULT_MARQUEE_MARGIN
+                self.box_metrics.margin_bottom = self.DEFAULT_MARQUEE_MARGIN
+            elif tag_name == 'copyright' or (hasattr(element, 'class_name') and 'copyright' in element.class_name):
+                # Custom copyright element or elements with copyright class
+                self.box_metrics.margin_top = self.DEFAULT_COPYRIGHT_MARGIN
+                self.box_metrics.margin_bottom = self.DEFAULT_COPYRIGHT_MARGIN
+            elif tag_name in ('div', 'section', 'article', 'header', 'nav', 'aside'):
                 self.box_metrics.margin_top = self.DEFAULT_BLOCK_MARGIN
                 self.box_metrics.margin_bottom = self.DEFAULT_BLOCK_MARGIN
             elif tag_name in ('li'):
                 self.box_metrics.margin_top = self.DEFAULT_LIST_ITEM_MARGIN
                 self.box_metrics.margin_bottom = self.DEFAULT_LIST_ITEM_MARGIN
                 self.box_metrics.margin_left = self.DEFAULT_LIST_ITEM_MARGIN * 2  # Indent list items
-            elif tag_name in ('span', 'a', 'strong', 'em', 'b', 'i'):
+            # Set margins for inline text elements
+            elif tag_name in ('a'):
+                # Links get slightly larger margins
                 self.box_metrics.margin_left = self.DEFAULT_INLINE_MARGIN
                 self.box_metrics.margin_right = self.DEFAULT_INLINE_MARGIN
+                self.box_metrics.margin_top = self.DEFAULT_TEXT_ELEMENT_MARGIN
+                self.box_metrics.margin_bottom = self.DEFAULT_TEXT_ELEMENT_MARGIN
+            elif tag_name in ('span', 'strong', 'em', 'b', 'i', 'u', 's', 'strike', 'del', 'ins',
+                            'small', 'sub', 'sup', 'code', 'kbd', 'mark', 'q', 'cite', 'dfn',
+                            'abbr', 'time', 'var', 'samp'):
+                # Text formatting elements
+                self.box_metrics.margin_left = self.DEFAULT_TEXT_ELEMENT_MARGIN
+                self.box_metrics.margin_right = self.DEFAULT_TEXT_ELEMENT_MARGIN
         
         # Set default display based on element tag if present
         if element and hasattr(element, 'tag_name'):
@@ -632,13 +659,16 @@ class LayoutBox:
                     
                     # Form elements should have a minimum height even if empty
                     if tag_name in ['input', 'button', 'select', 'textarea']:
-                        self.box_metrics.content_height = 12  # Minimum height for form elements
-                    elif tag_name in ['div', 'span', 'p', 'a']:
-                        # Ensure non-zero height for container elements
-                        self.box_metrics.content_height = 8  # Minimum height for containers
+                        self.box_metrics.content_height = 20  # Increased minimum height for form elements
+                    elif tag_name == 'div':
+                        # Ensure substantial height for div containers
+                        self.box_metrics.content_height = self.DEFAULT_DIV_MIN_HEIGHT
+                    elif tag_name in ['span', 'p', 'a', 'section', 'article', 'header', 'footer', 'nav', 'aside']:
+                        # Ensure non-zero height for containers
+                        self.box_metrics.content_height = 15  # Increased from 8
                     else:
                         # Default minimum height for any element
-                        self.box_metrics.content_height = 4
+                        self.box_metrics.content_height = 10  # Increased from 4
         
         # Update box dimensions after calculating content height
         self._update_box_dimensions()
@@ -698,9 +728,15 @@ class LayoutBox:
                             child_height = 0
                 else:
                     child_height = float(child.box_metrics.margin_box_height)
+                
+                # Get tag name for specific element handling
+                child_tag = child.element.tag_name.lower() if hasattr(child.element, 'tag_name') else ''
+                
+                # Add extra spacing for div elements
+                extra_spacing = 15 if child_tag == 'div' else 10
                     
                 # Move content_y down by the child's height to stack next child
-                content_y += child_height + 5  # Add small extra spacing between block children
+                content_y += child_height + extra_spacing  # Increased spacing between block children
             
         # Update height based on children if auto
         if self.box_metrics.height is None or self.box_metrics.height == 'auto':

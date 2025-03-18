@@ -525,11 +525,25 @@ class LayoutEngine:
             'input': 0.02, # 2% spacing for inputs
             'button': 0.02 # 2% spacing for buttons
         }
-
+        def smallest_multiplier(spacing):
+            # Find the smallest integer y where x * y = spacing for some x
+            if spacing <= 1:
+                return spacing  # Handle special cases
+        
+            # Check all potential divisors up to sqrt(spacing)
+            for i in range(2, int(spacing**0.5) + 1):
+                if spacing % i == 0:
+                    return i
+            
+            # If no divisors found, spacing is prime
+            return spacing
+        
         for child in layout_box.children:
             # Get current element's tag
             current_tag = child.element.tag_name.lower() if hasattr(child.element, 'tag_name') else None
             
+
+
             # Calculate spacing based on current and previous elements
             spacing = 0
             if current_tag and prev_element_tag:
@@ -547,12 +561,11 @@ class LayoutEngine:
                 elif current_tag == 'div' or prev_element_tag == 'div':
                     # Ensure minimum spacing when div is next to any other element
                     spacing = max((current_base + prev_base) / 2, 0.06) * container_width  # Increased to 6%
-                    
-                    # Add extra spacing between divs and headings or paragraphs
-                    if (current_tag and current_tag.startswith('h')) or (prev_element_tag and prev_element_tag.startswith('h')):
-                        spacing = max(spacing, 0.10 * container_width)  # 10% for headings
-                    elif current_tag == 'p' or prev_element_tag == 'p' or current_tag == 'a' or prev_element_tag == 'a':
-                        spacing = max(spacing, 0.07 * container_width)  # 7% for paragraphs
+                # Add extra spacing between divs and headings or paragraphs
+                elif (current_tag and current_tag.startswith('h')) or (prev_element_tag and prev_element_tag.startswith('h')):
+                    spacing = max((spacing * smallest_multiplier(spacing)), 0.10 * (container_width * 1.5))  # 10% for headings
+                elif current_tag == 'p' or prev_element_tag == 'p' or current_tag == 'a' or prev_element_tag == 'a' or current_tag == 'cite' or prev_element_tag == 'cite':
+                    spacing = max((spacing * smallest_multiplier(spacing)), 0.07 * (container_width * 1.5))  # 7% for paragraphs
                 else:
                     # Use half of each element's base spacing to create the gap
                     # But ensure a minimum spacing to prevent elements from merging visually
