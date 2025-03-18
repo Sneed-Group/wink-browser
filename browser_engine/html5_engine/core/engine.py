@@ -447,6 +447,9 @@ class HTML5Engine:
             
         self.logger.info("Processing stylesheets")
         
+        # Initialize default styles
+        self.css_parser.add_default_styles()
+        
         # Process inline styles
         try:
             elements_with_style = self._find_elements_with_attribute(self.document, "style")
@@ -719,6 +722,36 @@ class HTML5Engine:
             self.logger.error(f"Error calculating layout: {str(e)}")
             self._trigger_error(f"Layout calculation error: {str(e)}")
     
+    def _process_css(self) -> None:
+        """Process CSS for all elements in the document."""
+        if not self.document:
+            return
+            
+        # Process CSS for each element
+        def process_element(element):
+            # Skip non-element nodes
+            if not hasattr(element, 'node_type') or element.node_type != 1:  # ELEMENT_NODE
+                return
+                
+            # Get computed style for the element
+            if hasattr(element, 'get_computed_style'):
+                computed_style = element.get_computed_style()
+                if computed_style:
+                    # Store computed style on the element
+                    if not hasattr(element, 'computed_style'):
+                        element.computed_style = {}
+                    element.computed_style.update(computed_style)
+            
+            # Process children
+            if hasattr(element, 'child_nodes'):
+                for child in element.child_nodes:
+                    process_element(child)
+        
+        # Start processing from the document root
+        process_element(self.document)
+        
+        self.logger.debug("CSS processing completed")
+    
     def _render(self) -> None:
         """Render the document."""
         if not self.document:
@@ -750,7 +783,10 @@ class HTML5Engine:
             self.renderer.clear()
             
             # Process all CSS first
-            self._process_css()
+            try:
+                self._process_css()
+            except Exception as e:
+                self.logger.error(f"Error processing CSS: {e}")
             
             # Render the document using the calculated layout
             self.logger.debug(f"Passing layout_tree to renderer: {self.layout_tree}")

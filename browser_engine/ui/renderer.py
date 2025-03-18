@@ -256,50 +256,50 @@ class TkRenderer:
         Args:
             element: BeautifulSoup element
         """
-        # Skip comment nodes and other non-element nodes
+        # Create a unique identifier for this element
+        element_id = self._get_element_path(element)
+        
+        # Skip if this element was already processed
+        if element_id in self.processed_text_nodes:
+            return
+            
+        # Skip comment nodes
+        if isinstance(element, Comment):
+            return
+            
+        # Handle text nodes
         if element.name is None:
-            # This is a text node, render it as plain text
-            # Only render the text if it's directly in the body or another container,
-            # and not inside an element that will render it with get_text()
             parent_name = element.parent.name if element.parent else None
-            safe_to_render = parent_name in ('body', 'div', 'span', 'td', 'th', 'li', 'blockquote', 'section', 'article', 'aside')
+            # Only render text nodes that are direct children of block-level elements
+            safe_to_render = parent_name in ('body', 'div', 'td', 'th', 'li', 'blockquote', 'section', 'article', 'aside')
             
             if element.string and element.string.strip() and safe_to_render:
                 # Get the text with whitespace trimmed
                 text = element.string.strip()
                 
-                # Create a unique identifier for this text node using parent path
-                parent_path = self._get_element_path(element.parent) if element.parent else ''
-                text_id = f"{parent_path}_{text}"
-                
-                # Skip if this text was already processed
-                if text_id in self.processed_text_nodes:
-                    return
-                
-                # Get a unique tag identifier for this text
+                # Create a unique tag for this text
                 self.tag_counter += 1
                 tag_name = f"normal_{self.tag_counter}"
                 
-                # Create a custom tag for this specific text
+                # Configure text style
                 self.content_view.tag_configure(
                     tag_name, 
                     font=("Arial", int(12 * self.zoom_level))
                 )
                 
-                # Mark position to apply tag
+                # Insert and tag the text
                 start_index = self.content_view.index(tk.INSERT)
-                
-                # Insert the text
                 self.content_view.insert(tk.END, text + " ")  # Add space after text
-                
-                # Apply the tag to ONLY this text
                 end_index = self.content_view.index(tk.INSERT)
                 self.content_view.tag_add(tag_name, start_index, end_index)
                 
-                # Track this tag and text node
+                # Track this text node
+                self.processed_text_nodes[element_id] = True
                 self.applied_tags[start_index] = tag_name
-                self.processed_text_nodes[text_id] = True
             return
+            
+        # Mark this element as processed
+        self.processed_text_nodes[element_id] = True
         
         # Handle different HTML elements
         if element.name == 'h1':
@@ -346,10 +346,10 @@ class TkRenderer:
             # Individual list items are handled by render_list
             pass
         elif element.name in ('script', 'style', 'meta', 'link', 'head', 'option'):
-            # Skip these elements when processed directly (option is handled by _render_select)
+            # Skip these elements when processed directly
             pass
         else:
-            # For any other element, just render its children
+            # For any other element, process its children
             for child in element.children:
                 self._render_element(child)
     
@@ -411,6 +411,14 @@ class TkRenderer:
         Args:
             element: Paragraph element
         """
+        # Skip if this paragraph was already processed
+        para_id = self._get_element_path(element)
+        if para_id in self.processed_text_nodes:
+            return
+            
+        # Mark this paragraph as processed
+        self.processed_text_nodes[para_id] = True
+        
         # Get a unique tag identifier for this paragraph
         self.tag_counter += 1
         tag_name = f"p_{self.tag_counter}"
@@ -425,28 +433,38 @@ class TkRenderer:
             lmargin2=0
         )
         
-        # Add spacing before paragraph on a separate line
+        # Add spacing before paragraph
         self.content_view.insert(tk.END, "\n")
         
         # Start the paragraph on a fresh line
         current_line = self.content_view.index(tk.INSERT).split('.')[0]
         start_index = f"{current_line}.0"
         
-        # Extract all text content directly from the paragraph 
-        para_text = element.get_text().strip()
-        if para_text:
-            self.content_view.insert(tk.END, para_text)
+        # Process the paragraph content
+        has_nested_elements = False
+        direct_text = ""
+        
+        # First collect all direct text nodes
+        for child in element.children:
+            if child.name is None and child.string:
+                direct_text += child.string.strip() + " "
+            elif child.name is not None:
+                has_nested_elements = True
+                break
+        
+        # If we have only direct text, render it
+        if direct_text.strip() and not has_nested_elements:
+            self.content_view.insert(tk.END, direct_text.strip())
         else:
-            # Handle any nested elements if there's no direct text
+            # Otherwise process all children normally
             for child in element.children:
-                if child.name is not None:
-                    self._render_element(child)
+                self._render_element(child)
         
         # Get end position before adding spacing
         current_pos = self.content_view.index(tk.INSERT)
         end_index = current_pos
         
-        # Add spacing after paragraph on a separate line
+        # Add spacing after paragraph
         self.content_view.insert(tk.END, "\n")
         
         # Only apply tag if there was content
@@ -461,6 +479,16 @@ class TkRenderer:
         Args:
             element: Link element
         """
+        # Create a unique identifier for this link
+        link_id = self._get_element_path(element)
+        
+        # Skip if this link was already processed
+        if link_id in self.processed_text_nodes:
+            return
+            
+        # Mark this link as processed
+        self.processed_text_nodes[link_id] = True
+        
         href = element.get('href', '')
         
         # Get link text and strip whitespace
