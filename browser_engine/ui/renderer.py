@@ -32,7 +32,7 @@ class TkRenderer:
         self.zoom_level = 1.0
         
         # Track processed text nodes to prevent duplicates
-        self.processed_text_nodes = set()
+        self.processed_text_nodes = {}
         
         # Create the main content view
         self._create_content_view()
@@ -204,9 +204,9 @@ class TkRenderer:
         # Reset all tags and styling
         self._configure_text_tags()
         
-        # Clear processed nodes tracking
-        self.processed_text_nodes.clear()
-        self.applied_tags.clear()
+        # Clear processed nodes tracking with a more robust structure
+        self.processed_text_nodes = {}
+        self.applied_tags = {}
         self.tag_counter = 0
         
         # Get the DOM from the engine
@@ -268,8 +268,9 @@ class TkRenderer:
                 # Get the text with whitespace trimmed
                 text = element.string.strip()
                 
-                # Create a unique identifier for this text node
-                text_id = f"{id(element)}_{text}"
+                # Create a unique identifier for this text node using parent path
+                parent_path = self._get_element_path(element.parent) if element.parent else ''
+                text_id = f"{parent_path}_{text}"
                 
                 # Skip if this text was already processed
                 if text_id in self.processed_text_nodes:
@@ -295,11 +296,9 @@ class TkRenderer:
                 end_index = self.content_view.index(tk.INSERT)
                 self.content_view.tag_add(tag_name, start_index, end_index)
                 
-                # Track this tag
+                # Track this tag and text node
                 self.applied_tags[start_index] = tag_name
-                
-                # Mark this text node as processed
-                self.processed_text_nodes.add(text_id)
+                self.processed_text_nodes[text_id] = True
             return
         
         # Handle different HTML elements
@@ -765,4 +764,27 @@ class TkRenderer:
         self._configure_text_tags()
         
         # Refresh the view to apply changes
-        self.update() 
+        self.update()
+
+    def _get_element_path(self, element) -> str:
+        """
+        Get a unique path identifier for an element.
+        
+        Args:
+            element: BeautifulSoup element
+            
+        Returns:
+            String representing the element's path
+        """
+        if not element:
+            return ''
+            
+        path = []
+        current = element
+        while current and current.name:
+            siblings = current.find_previous_siblings(current.name)
+            position = len(siblings) + 1
+            path.append(f"{current.name}[{position}]")
+            current = current.parent
+            
+        return '/'.join(reversed(path)) 

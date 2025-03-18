@@ -10,6 +10,7 @@ from .text import Text
 from .comment import Comment
 from .document import Document
 from .selector_engine import SelectorEngine
+from .markdown_dom_creator import MarkdownDOMCreator
 
 # Define a Parser class that integrates with Document
 class Parser:

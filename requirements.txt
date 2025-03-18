@@ -7,6 +7,8 @@ pillow>=9.2.0
 python-magic>=0.4.27  # For content type detection
 certifi>=2023.7.22  # For SSL certificate validation
 urllib3>=2.0.7,<3.0  # Updated for better HTTPS support
+html2text>=2020.1.16  # For HTML to Markdown conversion
+markdown>=3.4.3  # For Markdown to HTML conversion
 
 # UI dependencies
 # Note: Tkinter comes with Python installation, not via pip

@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse
 
 # Import DOM components
-from browser_engine.html5_engine.dom import Document, Element, Parser
+from browser_engine.html5_engine.dom import Document, Element, Parser, MarkdownDOMCreator
 
 # Import CSS components
 from browser_engine.html5_engine.css import CSSParser, LayoutEngine
@@ -36,6 +36,7 @@ class HTML5Engine:
         # Initialize parsers
         self.dom_parser = Parser()
         self.css_parser = CSSParser()
+        self.markdown_dom_creator = MarkdownDOMCreator()
         
         # Initialize layout engine
         self.layout_engine = LayoutEngine()
@@ -391,120 +392,44 @@ class HTML5Engine:
             logger.error(f"Error handling data: URL: {e}")
             return False
     
-    def load_html(self, html_content: str, base_url: str = None) -> bool:
+    def load_html(self, html_content: str, base_url: Optional[str] = None) -> bool:
         """
-        Load and parse HTML content.
+        Load HTML content into the engine.
         
         Args:
-            html_content: The HTML content to parse
-            base_url: The base URL for resolving relative URLs
+            html_content: The HTML content to load
+            base_url: Optional base URL for resolving relative URLs
             
         Returns:
             True if loading was successful, False otherwise
         """
         try:
-            # Check if html_content is None
-            if html_content is None:
-                error_msg = "Cannot load HTML: Content is None"
-                logger.error(error_msg)
-                self.is_loading = False
-                self.load_error = error_msg
-                
-                # Fire error event
-                if self.on_page_error_callback:
-                    self.on_page_error_callback(error_msg)
-                
-                return False
-                
-            logger.info("Loading HTML content")
             self.is_loading = True
             self.load_error = None
+            self.base_url = base_url
             
-            # Use provided base_url or keep the current one if it exists,
-            # only fall back to about:blank if we don't have any URL context
-            if base_url:
-                self.base_url = base_url
-            elif not self.base_url:
-                self.base_url = "about:blank"
-                
-            logger.debug(f"Using base URL: {self.base_url}")
+            # Create document using markdown DOM creator
+            self.document = self.markdown_dom_creator.create_dom(html_content, base_url)
             
-            # Reset previous state
-            self.title = ""
+            # Update title
+            if self.document and self.document.title:
+                self.title = self.document.title
+                if self.on_title_change_callback:
+                    self.on_title_change_callback(self.title)
             
-            # Debug: Print first 100 chars of HTML content
-            logger.debug(f"HTML content preview: {html_content[:100]}...")
-            
-            # Parse HTML into DOM
-            prev_document = self.document
-            self.document = self.dom_parser.parse(html_content, self.base_url)
-            
-            # Enhanced debugging for document creation
-            logger.debug(f"HTML LOAD DEBUG: Previous document: {prev_document}")
-            logger.debug(f"HTML LOAD DEBUG: New document: {self.document}")
-            logger.debug(f"HTML LOAD DEBUG: Document type: {type(self.document)}")
-            logger.debug(f"HTML LOAD DEBUG: Document has document_element: {hasattr(self.document, 'document_element') and self.document.document_element is not None}")
-            if hasattr(self.document, 'document_element') and self.document.document_element is not None:
-                logger.debug(f"HTML LOAD DEBUG: Document element tag_name: {self.document.document_element.tag_name}")
-                logger.debug(f"HTML LOAD DEBUG: Document element has {len(self.document.document_element.child_nodes)} children")
-                
-            # Debug: Check document after parsing
-            logger.debug(f"Document created: {self.document is not None}")
-            logger.debug(f"Document type: {type(self.document)}")
-            logger.debug(f"Document has document_element: {hasattr(self.document, 'document_element') and self.document.document_element is not None}")
-            
-            # Extract title if available
-            if self.document and hasattr(self.document, 'getElementsByTagName'):
-                title_elements = self.document.getElementsByTagName('title')
-                if title_elements and len(title_elements) > 0 and hasattr(title_elements[0], 'textContent'):
-                    self.title = title_elements[0].textContent.strip()
-                    logger.debug(f"Found document title: {self.title}")
-                    
-                    # Fire title change event
-                    if self.on_title_change_callback:
-                        self.on_title_change_callback(self.title)
-                        
-            # Make sure the renderer has the correct document
-            if self.renderer:
-                logger.debug("Setting document in renderer")
-                self.renderer.document = self.document
-                
-                # Also set the URL in the renderer
-                if hasattr(self.renderer, 'current_url'):
-                    self.renderer.current_url = self.base_url
-                    logger.debug(f"Set renderer URL to: {self.base_url}")
-            
-            # Pre-load external resources
-            self._preload_resources()
-            
-            # Process CSS
-            self._process_css()
-            
-            # Calculate layout
-            self._calculate_layout()
-            
-            # Render the document
-            self.render()
-            
-            # Complete loading
+            # Notify page load complete
             self.is_loading = False
-            
-            # Fire load event
             if self.on_page_load_callback:
                 self.on_page_load_callback()
-            
-            logger.info(f"HTML content loaded successfully: {self.title}")
+                
             return True
             
         except Exception as e:
-            self.is_loading = False
+            logger.error(f"Error loading HTML: {e}")
             self.load_error = str(e)
-            logger.error(f"Error loading HTML: {e}", exc_info=True)
-            
-            # Fire error event
+            self.is_loading = False
             if self.on_page_error_callback:
                 self.on_page_error_callback(str(e))
-                
             return False
     
     def _preload_resources(self) -> None:
@@ -959,59 +884,30 @@ class HTML5Engine:
             logger.error(f"Error calculating layout: {e}", exc_info=True)
             self.layout_tree = None
     
-    def render(self) -> None:
-        """Render the document."""
+    def render(self, viewport_width: int, viewport_height: int) -> None:
+        """
+        Render the current document.
+        
+        Args:
+            viewport_width: Width of the viewport
+            viewport_height: Height of the viewport
+        """
+        if not self.document or not self.renderer:
+            return
+            
         try:
-            # Check required components
-            if not self.document:
-                logger.error("Cannot render: Document is missing")
-                return
-                
-            if not self.renderer:
-                logger.error("Cannot render: Renderer is not initialized")
-                return
+            # Calculate layout
+            layout_tree = self.layout_engine.create_layout(
+                self.document,
+                viewport_width,
+                viewport_height
+            )
             
-            # Verify document state before rendering
-            document_has_element = hasattr(self.document, 'document_element') and self.document.document_element is not None
-            logger.debug(f"Pre-render document check: document exists, has document_element: {document_has_element}")
-            if document_has_element:
-                element_count = len(self.document.getElementsByTagName('*')) if hasattr(self.document, 'getElementsByTagName') else 0
-                logger.debug(f"Document element count: {element_count}")
-                logger.debug(f"Document element tag: {self.document.document_element.tag_name}")
-                children_count = len(self.document.document_element.child_nodes) if hasattr(self.document.document_element, 'child_nodes') else 0
-                logger.debug(f"Document element has {children_count} children")
-            
-            # Make sure document is not replaced by None
-            document_to_render = self.document
-            if not document_to_render:
-                logger.error("Document became None right before rendering")
-                return
-                
-            # Make sure the document URL is set correctly
-            if hasattr(document_to_render, 'url') and self.base_url:
-                if document_to_render.url != self.base_url:
-                    logger.debug(f"Updating document URL from '{document_to_render.url}' to '{self.base_url}'")
-                    document_to_render.url = self.base_url
-            
-            # Make sure the renderer has the correct document - use document_to_render to avoid the reference being changed
-            logger.debug(f"Setting document in renderer (id: {id(document_to_render)})")
-            self.renderer.document = document_to_render
-            
-            # Also set the URL in the renderer if it has the property
-            if hasattr(self.renderer, 'current_url'):
-                self.renderer.current_url = self.base_url
-                
-            # Render the document - explicitly pass document_to_render to avoid any reference issues
-            logger.debug(f"Rendering document with URL: {self.base_url}")
-            self.renderer.render(document_to_render)
-            
-            # Complete rendering
-            logger.info(f"Document rendered successfully: {self.title}")
+            # Render the layout tree
+            self.renderer.render(layout_tree)
             
         except Exception as e:
-            logger.error(f"Error rendering document: {e}", exc_info=True)
-            
-            # Fire error event
+            logger.error(f"Error rendering document: {e}")
             if self.on_page_error_callback:
                 self.on_page_error_callback(str(e))
     
