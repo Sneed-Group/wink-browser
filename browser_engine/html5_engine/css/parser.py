@@ -158,19 +158,19 @@ class CSSParser:
             # Clear existing default styles
             self.default_style_rules = {}
             
-            # Define minimal default styles for common HTML elements
+            # Define default styles for various HTML elements
             default_styles = """
-            /* Minimal default styles for common HTML elements */
+            /* Default styles for common HTML elements */
             body {
-                margin: 0;
-                padding: 0;
+                margin: 24px;
+                line-height: 1.6;
                 font-family: sans-serif;
                 font-size: 16px;
-                line-height: 1.5;
                 color: #000;
             }
             
             div, span, p {
+                display: block;
                 margin: 0;
                 padding: 0;
             }
@@ -180,41 +180,206 @@ class CSSParser:
             }
             
             h1, h2, h3, h4, h5, h6 {
-                margin: 0;
-                padding: 0;
+                display: block;
                 font-weight: bold;
+                margin-top: 1.2em;
+                margin-bottom: 0.8em;
+                line-height: 1.3;
             }
             
-            a {
+            h1 {
+                font-size: 2em;
+                margin-top: 1em;
+                margin-bottom: 0.8em;
+            }
+            
+            h2 {
+                font-size: 1.5em;
+                margin-top: 0.9em;
+                margin-bottom: 0.7em;
+            }
+            
+            h3 {
+                font-size: 1.17em;
+                margin-top: 0.8em;
+                margin-bottom: 0.6em;
+            }
+            
+            h4 {
+                font-size: 1em;
+                margin-top: 0.7em;
+                margin-bottom: 0.5em;
+            }
+            
+            h5 {
+                font-size: 0.83em;
+                margin-top: 0.6em;
+                margin-bottom: 0.4em;
+            }
+            
+            h6 {
+                font-size: 0.67em;
+                margin-top: 0.5em;
+                margin-bottom: 0.3em;
+            }
+            
+            /* Navigation and link styles */
+            nav {
+                display: block;
+                margin-bottom: 1.5em;
+            }
+            
+            nav a {
+                display: block;
+                margin: 0.5em 0;
+                line-height: 1.4;
+            }
+            
+            a:link {
                 color: blue;
                 text-decoration: underline;
                 cursor: pointer;
+                display: inline;
+                padding: 0.1em 0;
+            }
+            
+            /* RFC references */
+            pre {
+                display: block;
+                font-family: monospace;
+                white-space: pre;
+                margin: 1em 0;
+                padding: 0.5em;
+                line-height: 1.4;
+            }
+            
+            /* Text blocks */
+            p {
+                margin-top: 1em;
+                margin-bottom: 1em;
+                line-height: 1.5;
+            }
+            
+            /* Lists */
+            ul, ol {
+                margin: 1em 0;
+                padding-left: 2em;
+            }
+            
+            li {
+                margin: 0.5em 0;
+                line-height: 1.4;
+            }
+            
+            /* Sidebar navigation */
+            .sidebar a, nav a {
+                display: block;
+                margin: 0.8em 0;
+                line-height: 1.4;
+            }
+            
+            /* RFC references */
+            .rfc-ref {
+                display: block;
+                margin: 1em 0;
+            }
+            
+            a:visited {
+                color: purple;
+                text-decoration: underline;
+            }
+            
+            a:hover {
+                text-decoration: underline;
+            }
+            
+            a:active {
+                color: red;
             }
             
             img, video, canvas, object {
                 display: inline-block;
                 border: none;
+                margin: 2em 0;
             }
             
             table {
-                border-collapse: collapse;
-                border-spacing: 0;
+                display: table;
+                border-collapse: separate;
+                border-spacing: 8px;
+                border-color: gray;
+                box-sizing: border-box;
+                margin: 2em 0;
+            }
+            
+            tr {
+                display: table-row;
+                vertical-align: inherit;
+                border-color: inherit;
             }
             
             td, th {
+                display: table-cell;
+                vertical-align: inherit;
                 border: 1px solid #ddd;
-                padding: 8px;
+                padding: 10px;
             }
             
             input, button, textarea, select {
+                display: inline-block;
                 font-family: inherit;
                 font-size: inherit;
-                padding: 8px;
+                padding: 10px;
                 border: 1px solid #767676;
+                margin: 1.2em 0;
+            }
+            
+            input[type="text"], input[type="password"], textarea {
+                background-color: white;
+            }
+            
+            input[type="checkbox"], input[type="radio"] {
+                margin: 5px;
+            }
+            
+            button {
+                padding: 10px 20px;
+                background-color: #f0f0f0;
             }
             
             code {
                 font-family: monospace;
+            }
+            
+            /* Block elements */
+            article, section, nav, aside, header, footer, 
+            address, blockquote, figcaption, figure, hgroup,
+            main, details, summary {
+                display: block;
+                margin: 1.5em 0;
+                padding: 0;
+            }
+            
+            blockquote {
+                margin-left: 2em;
+                padding-left: 1em;
+                border-left: 3px solid #ddd;
+            }
+            
+            /* Inline elements */
+            abbr, b, bdi, bdo, cite, code, data, dfn, em, i, 
+            kbd, mark, q, rp, rt, ruby, s, samp, small, 
+            strong, sub, sup, time, u, var, wbr {
+                display: inline;
+            }
+            
+            hr {
+                display: block;
+                margin-top: 2em;
+                margin-bottom: 2em;
+                border-style: solid;
+                border-width: 1px;
+                border-color: #ddd;
             }
             """
             
@@ -466,95 +631,104 @@ class CSSParser:
     
     def get_computed_style(self, element: Element) -> Dict[str, str]:
         """
-        Get computed style for an element following proper CSS cascade rules.
+        Calculate the computed style for an element.
         
         Args:
-            element: The DOM element to compute styles for
+            element: The element to calculate styles for
             
         Returns:
-            Dictionary of computed styles
+            Dictionary of computed style properties
         """
         computed_style = {}
         
-        # Start with default browser styles (lowest precedence)
+        # Get document
+        document = element.owner_document
+        if not document:
+            return computed_style
+        
+        # Calculate and sort rules by specificity
         default_rules = []
+        site_rules = []
+        important_rules = []
+        
+        # Collect matching default style rules
         for selector, props in self.default_style_rules.items():
             try:
-                if element.matches_selector(selector):
+                if document.matches_selector(element, selector):
                     specificity = self._calculate_specificity(selector)
                     default_rules.append((specificity, selector, props))
             except Exception:
+                # Skip selectors that can't be processed
                 pass
         
         # Sort default rules by specificity
         default_rules.sort(key=lambda x: x[0])
         
-        # Apply default styles (lowest precedence)
+        # First apply default browser styles (lowest precedence)
         for _, selector, props in default_rules:
             for prop_name, prop_value in props.items():
                 if not '!important' in str(prop_value):  # Skip important rules for now
                     computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
         
         # Collect matching site style rules
-        site_rules = []
         for stylesheet in self.stylesheets:
             for selector, props in stylesheet.items():
                 try:
-                    if element.matches_selector(selector):
+                    if document.matches_selector(element, selector):
                         specificity = self._calculate_specificity(selector)
                         site_rules.append((specificity, selector, props))
                 except Exception:
+                    # Skip selectors that can't be processed
                     pass
         
         # Sort site rules by specificity
         site_rules.sort(key=lambda x: x[0])
         
-        # Apply site styles (higher precedence than default styles)
+        # Then apply site stylesheets (higher precedence, overrides default styles)
         for _, selector, props in site_rules:
             for prop_name, prop_value in props.items():
                 if not '!important' in str(prop_value):  # Skip important rules for now
                     computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
         
-        # Apply inline styles (highest precedence except !important)
+        # Add inline styles (higher precedence than site styles, lower than !important)
         inline_styles = {}
         style_attr = element.get_attribute('style')
         if style_attr:
             inline_styles = self.parse_inline_styles(style_attr)
+            
             for prop_name, prop_value in inline_styles.items():
                 if not '!important' in str(prop_value):  # Skip important rules for now
                     computed_style[prop_name] = prop_value.replace('!important', '').strip() if isinstance(prop_value, str) else prop_value
         
-        # Finally apply !important rules from all sources in order of specificity
-        important_rules = []
-        
         # Collect !important rules from all sources
+        # Default !important
         for _, selector, props in default_rules:
             for prop_name, prop_value in props.items():
                 if isinstance(prop_value, str) and '!important' in prop_value:
                     specificity = self._calculate_specificity(selector)
                     important_rules.append((specificity, 0, prop_name, prop_value.replace('!important', '').strip()))
         
+        # Site !important
         for _, selector, props in site_rules:
             for prop_name, prop_value in props.items():
                 if isinstance(prop_value, str) and '!important' in prop_value:
                     specificity = self._calculate_specificity(selector)
                     important_rules.append((specificity, 1, prop_name, prop_value.replace('!important', '').strip()))
         
-        if style_attr:
-            inline_styles = self.parse_inline_styles(style_attr)
-            for prop_name, prop_value in inline_styles.items():
-                if isinstance(prop_value, str) and '!important' in prop_value:
-                    important_rules.append((float('inf'), 2, prop_name, prop_value.replace('!important', '').strip()))
+        # Inline !important (highest specificity)
+        for prop_name, prop_value in inline_styles.items():
+            if isinstance(prop_value, str) and '!important' in prop_value:
+                important_rules.append(((1, 0, 0), 2, prop_name, prop_value.replace('!important', '').strip()))
         
-        # Sort important rules by specificity and source
+        # Sort important rules by specificity, then by source (0=default, 1=site, 2=inline)
         important_rules.sort(key=lambda x: (x[0], x[1]))
         
-        # Apply !important rules (highest precedence)
+        # Apply all !important rules last (highest precedence)
         for _, _, prop_name, prop_value in important_rules:
             computed_style[prop_name] = prop_value
         
         return computed_style
-    
+        
     def _calculate_specificity(self, selector: str) -> tuple:
         """
         Calculate the specificity of a CSS selector.

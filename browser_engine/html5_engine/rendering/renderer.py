@@ -18,8 +18,6 @@ import urllib.parse
 import urllib.error
 import base64
 import time
-import io
-from bs4.element import Comment
 
 from ..dom import Document, Element, Node, NodeType
 from ..css import LayoutEngine, LayoutBox, CSSParser, DisplayType, BoxType
@@ -192,56 +190,30 @@ class HTML5Renderer:
             parent: Parent Tkinter frame
         """
         self.parent = parent
-        self.engine = None
-        self.document = None
         
-        # Create scrolled canvas
-        self.frame = ttk.Frame(self.parent)
-        self.frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create canvas with scrollbars
-        self.canvas = tk.Canvas(
-            self.frame,
-            bg='white',
-            highlightthickness=0
-        )
+        # Create the main content frame
+        self.main_frame = ttk.Frame(parent)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Create scrollbars
-        self.v_scrollbar = ttk.Scrollbar(self.frame, orient=tk.VERTICAL)
-        self.h_scrollbar = ttk.Scrollbar(self.frame, orient=tk.HORIZONTAL)
+        self.v_scrollbar = ttk.Scrollbar(self.main_frame, orient=tk.VERTICAL)
+        self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Configure scrollbars
+        self.h_scrollbar = ttk.Scrollbar(self.main_frame, orient=tk.HORIZONTAL)
+        self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Create the canvas for rendering
+        self.canvas = tk.Canvas(
+            self.main_frame,
+            yscrollcommand=self.v_scrollbar.set,
+            xscrollcommand=self.h_scrollbar.set,
+            bg='#f5f5f5'  # Light gray background instead of white
+        )
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Link scrollbars to canvas
         self.v_scrollbar.config(command=self.canvas.yview)
         self.h_scrollbar.config(command=self.canvas.xview)
-        self.canvas.config(
-            yscrollcommand=self.v_scrollbar.set,
-            xscrollcommand=self.h_scrollbar.set
-        )
-        
-        # Grid layout
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        self.v_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.h_scrollbar.grid(row=1, column=0, sticky="ew")
-        
-        # Configure grid weights
-        self.frame.grid_rowconfigure(0, weight=1)
-        self.frame.grid_columnconfigure(0, weight=1)
-        
-        # Initialize state
-        self.viewport_width = 800
-        self.viewport_height = 600
-        self.zoom_level = 1.0
-        self.processed_nodes = set()
-        self.canvas_items = []
-        self.current_y = 10
-        self.image_cache = {}
-        
-        # Initialize fonts and colors
-        self._init_fonts()
-        self._init_colors()
-        self._init_event_bindings()
-        
-        logger.info("HTML5Renderer initialized")
         
         # Layout and CSS engines
         self.layout_engine = LayoutEngine()
@@ -257,6 +229,7 @@ class HTML5Renderer:
             self.js_engine = None
         
         # Document and layout tree
+        self.document: Optional[Document] = None
         self.layout_tree: Optional[LayoutBox] = None
         
         # Canvas items (for cleanup)
@@ -286,7 +259,6 @@ class HTML5Renderer:
         
         # Debug options
         self.draw_debug_boxes = False
-        self.is_debug_mode = False  # Initialize is_debug_mode
         
         # Event bindings
         self._init_event_bindings()
@@ -294,77 +266,55 @@ class HTML5Renderer:
         # Link handling callbacks
         self.on_link_click: Optional[Callable[[str], None]] = None
         
+        logger.debug("HTML5 Renderer initialized")
+        
+        # No longer drawing a debug rectangle to avoid rendering issues
+        
         # Track processed nodes to prevent duplicates
         self.processed_nodes = set()
     
     def _init_fonts(self) -> None:
-        """Initialize fonts for rendering."""
+        """
+        Initialize fonts for rendering.
+        """
+        # Initialize default fonts
         self.fonts = {
             'default': ('Arial', 12),
-            'h1': ('Arial', 24, 'bold'),
-            'h2': ('Arial', 20, 'bold'),
-            'h3': ('Arial', 16, 'bold'),
-            'h4': ('Arial', 14, 'bold'),
-            'h5': ('Arial', 12, 'bold'),
-            'h6': ('Arial', 10, 'bold'),
-            'code': ('Courier', 12),
-            'pre': ('Courier', 12),
-            'link': ('Arial', 12, 'underline')
+            'heading': ('Arial', 16, 'bold'),
+            'monospace': ('Courier New', 12),
+            'serif': ('Times New Roman', 12),
+            'sans-serif': ('Arial', 12),
+            'cursive': ('Comic Sans MS', 12),
+            'fantasy': ('Impact', 12),
         }
         
+        # Font style modifiers
+        self.font_styles = {
+            'bold': 'bold',
+            'italic': 'italic',
+            'underline': 'underline',
+            'overstrike': 'overstrike'  # For strikethrough
+        }
+    
     def _init_colors(self) -> None:
         """Initialize colors for rendering."""
         self.colors = {
-            'text': '#000000',
             'link': '#0000EE',
             'visited_link': '#551A8B',
-            'background': '#FFFFFF',
+            'active_link': '#FF0000',
+            'selection': '#B5D5FF',
+            'default_text': '#000000',
             'border': '#000000',
-            'button': '#E0E0E0',
-            'button_hover': '#D0D0D0',
-            'button_active': '#C0C0C0',
-            'input_border': '#767676',
-            'input_background': '#FFFFFF',
-            'code_background': '#F0F0F0'
+            'background': '#FFFFFF',
         }
-        
+    
     def _init_event_bindings(self) -> None:
-        """Initialize event bindings."""
-        # Mouse wheel scrolling
-        self.canvas.bind("<MouseWheel>", self._on_mousewheel)  # Windows
-        self.canvas.bind("<Button-4>", self._on_mousewheel)    # Linux scroll up
-        self.canvas.bind("<Button-5>", self._on_mousewheel)    # Linux scroll down
+        """Initialize event bindings for the canvas."""
+        # Mouse click event binding
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
         
-        # Window resize
+        # Resize event binding
         self.parent.bind("<Configure>", self._on_resize)
-        
-    def _on_mousewheel(self, event) -> None:
-        """Handle mouse wheel scrolling."""
-        # Determine scroll direction and amount
-        if event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
-            # Scroll up
-            self.canvas.yview_scroll(-1, "units")
-        elif event.num == 5 or (hasattr(event, 'delta') and event.delta < 0):
-            # Scroll down
-            self.canvas.yview_scroll(1, "units")
-            
-    def _on_resize(self, event) -> None:
-        """Handle window resize events."""
-        # Only process if size actually changed
-        if hasattr(self, 'last_width') and hasattr(self, 'last_height'):
-            if event.width == self.last_width and event.height == self.last_height:
-                return
-                
-        self.last_width = event.width
-        self.last_height = event.height
-        
-        # Update viewport dimensions
-        self.viewport_width = event.width
-        self.viewport_height = event.height
-        
-        # Re-render content if we have a document
-        if hasattr(self, 'document') and self.document:
-            self.render(self.document)
     
     def set_engine(self, engine) -> None:
         """
@@ -373,16 +323,7 @@ class HTML5Renderer:
         Args:
             engine: The HTML5Engine instance
         """
-        self.engine = engine
-        
-        # Initialize engines if available
-        if hasattr(engine, 'css_parser'):
-            self.css_parser = engine.css_parser
-        if hasattr(engine, 'layout_engine'):
-            self.layout_engine = engine.layout_engine
-        if hasattr(engine, 'js_engine'):
-            self.js_engine = engine.js_engine
-            
+        self.html5_engine = engine
         logger.debug("HTML5Engine reference set in renderer")
     
     def clear(self) -> None:
@@ -412,6 +353,21 @@ class HTML5Renderer:
                 href = element.get_attribute('href')
                 if href and self.on_link_click:
                     self.on_link_click(href)
+    
+    def _on_resize(self, event) -> None:
+        """
+        Handle resize events.
+        
+        Args:
+            event: Tkinter event object
+        """
+        # Update viewport dimensions
+        self.viewport_width = event.width
+        self.viewport_height = event.height
+        
+        # Re-render the document if available
+        if self.document:
+            self.render(self.document)
     
     def _find_element_at_position(self, x: int, y: int) -> Optional[Element]:
         """
@@ -450,7 +406,16 @@ class HTML5Renderer:
             document: The DOM document to render
             layout: Optional pre-computed layout box
         """
-        # Store document reference
+        # Enhanced debug logging for document state
+        logger.debug(f"RENDER DEBUG: document is: {document}")
+        logger.debug(f"RENDER DEBUG: document type is: {type(document)}")
+        logger.debug(f"RENDER DEBUG: document id: {id(document)}")
+        logger.debug(f"RENDER DEBUG: document has url: {hasattr(document, 'url')}")
+        logger.debug(f"RENDER DEBUG: document has document_element: {hasattr(document, 'document_element') and document.document_element is not None}")
+        logger.debug(f"RENDER DEBUG: self.document before assignment is: {self.document}")
+        
+        # Store document reference - use direct assignment to avoid reference issues
+        old_document = self.document
         self.document = document
         
         # Check if document is valid
@@ -469,26 +434,542 @@ class HTML5Renderer:
         url_str = document.url if hasattr(document, 'url') else 'unknown'
         logger.info(f"Rendering document: {url_str}")
         
-        # Clear any existing content and state
-        self._clear_canvas()
-        self.processed_nodes = set()  # Use a set for better performance
-        self.canvas_items.clear()
+        # Count elements with enhanced error handling
+        element_count = 0
+        try:
+            if hasattr(document, 'getElementsByTagName'):
+                elements = document.getElementsByTagName('*')
+                element_count = len(elements)
+                logger.debug(f"Found {element_count} elements using getElementsByTagName")
+                
+                # Additional validation of the document structure
+                if element_count == 0:
+                    logger.warning("Document returned 0 elements - checking structure directly")
+                    if hasattr(document, 'document_element') and document.document_element is not None:
+                        # Try manual counting through traversal
+                        def count_elements(node):
+                            count = 0
+                            if hasattr(node, 'node_type') and node.node_type == getattr(node, 'ELEMENT_NODE', 1):
+                                count = 1
+                            if hasattr(node, 'child_nodes'):
+                                for child in node.child_nodes:
+                                    count += count_elements(child)
+                            return count
+                        
+                        manual_count = count_elements(document.document_element)
+                        logger.debug(f"Manual traversal found {manual_count} elements")
+                        element_count = manual_count
+        except Exception as e:
+            logger.error(f"Error counting elements: {e}")
+            # Continue with rendering
         
-        # Process all styles first
-        self._process_all_styles(document)
+        logger.info(f"Document has {element_count} elements")
         
-        # Render using layout if provided
-        if layout:
-            self._render_layout_tree(layout)
+        # Clear any previous content
+        self.clear()
+        
+        # More detailed logging for debugging element detection
+        logger.debug(f"RENDER DEBUG: document_element exists: {hasattr(document, 'document_element') and document.document_element is not None}")
+        if hasattr(document, 'document_element') and document.document_element is not None:
+            logger.debug(f"RENDER DEBUG: document_element tag name: {document.document_element.tag_name}")
+            logger.debug(f"RENDER DEBUG: document_element has children: {len(document.document_element.child_nodes) > 0}")
+            
+            # List all children of document_element for debugging
+            if len(document.document_element.child_nodes) > 0:
+                logger.debug("Children of document_element:")
+                for i, child in enumerate(document.document_element.child_nodes):
+                    child_type = getattr(child, 'tag_name', getattr(child, 'node_type', 'unknown'))
+                    logger.debug(f"  Child {i}: {child_type}")
+        
+        # Process all CSS first
+        try:
+            self._process_all_styles(document)
+            logger.debug("CSS styles processed successfully")
+        except Exception as e:
+            logger.error(f"Error processing CSS styles: {e}")
+            # Continue anyway to render what we can
+        
+        # Execute JavaScript if we have a JS engine
+        scripts_executed = False
+        if hasattr(self, 'js_engine') and self.js_engine:
+            try:
+                logger.debug("Executing JavaScript in document")
+                self.js_engine.execute_scripts(document)
+                scripts_executed = True
+                logger.debug("JavaScript executed successfully")
+            except Exception as e:
+                logger.error(f"Error executing JavaScript: {e}")
+        
+        # Create layout tree if not provided
+        if not layout:
+            logger.debug("Creating layout tree")
+            try:
+                self.layout_tree = self.layout_engine.create_layout(
+                    document, 
+                    viewport_width=self.viewport_width, 
+                    viewport_height=self.viewport_height
+                )
+                logger.debug("Layout tree created successfully")
+            except Exception as e:
+                logger.error(f"Error creating layout tree: {e}")
+                self._show_error_message(f"Layout error: {str(e)}")
+                return
         else:
-            # Fallback to direct rendering if no layout provided
-            self._fallback_direct_render(document)
+            logger.debug("Using provided layout tree")
+            self.layout_tree = layout
+            
+        if not self.layout_tree:
+            logger.error("Failed to create layout tree")
+            self._show_error_message("Failed to create layout")
+            return
+            
+        # Apply the viewport dimensions - use correct method
+        try:
+            # Try to use layout method if available
+            if hasattr(self.layout_tree, 'layout'):
+                self.layout_tree.layout(self.viewport_width)
+                logger.debug("Applied layout using layout_tree.layout method")
+            else:
+                # Use the layout engine to layout the tree
+                self.layout_engine.layout(self.layout_tree, self.viewport_width, self.viewport_height)
+                logger.debug("Applied layout using layout_engine.layout method")
+        except Exception as e:
+            logger.error(f"Error during layout: {e}")
+            # Continue anyway to render what we can
+        
+        # Render the document
+        self._clear_canvas()
+        
+        # Process the layout tree and sort by z-index before rendering
+        try:
+            self._prepare_stacking_contexts(self.layout_tree)
+            logger.debug("Stacking contexts prepared")
+        except Exception as e:
+            logger.error(f"Error preparing stacking contexts: {e}")
+            # Continue anyway
+        
+        # Check if we're on the debug page
+        is_debug_page = False
+        document_url = None
+        
+        # Try multiple ways to get the document URL
+        if hasattr(document, 'url'):
+            document_url = document.url
+            is_debug_page = document_url == "about:debug"
+            logger.debug(f"Document URL from document.url: {document_url}, is_debug_page: {is_debug_page}")
+        elif hasattr(self, 'html5_engine') and hasattr(self.html5_engine, 'base_url'):
+            document_url = self.html5_engine.base_url
+            is_debug_page = document_url == "about:debug"
+            logger.debug(f"Document URL from engine.base_url: {document_url}, is_debug_page: {is_debug_page}")
+        else:
+            logger.debug("Could not determine URL for debug mode check")
+            
+        # Add direct debugging of document contents
+        if document:
+            try:
+                # Make sure we're using the correct document
+                if hasattr(document, 'head') and document.head:
+                    logger.debug(f"Document has head element directly: {document.head is not None}")
+                    
+                if hasattr(document, 'body') and document.body:
+                    logger.debug(f"Document has body element directly: {document.body is not None}")
+                
+                # Try to find title in head
+                title_element = None
+                if hasattr(document, 'head') and document.head:
+                    for child in document.head.child_nodes:
+                        if hasattr(child, 'tag_name') and child.tag_name.lower() == 'title':
+                            title_element = child
+                            break
+                
+                logger.debug(f"Found title in head: {title_element is not None}")
+                if title_element and hasattr(title_element, 'textContent'):
+                    logger.debug(f"Title text from head: {title_element.textContent}")
+                
+                # Try querySelector as fallback
+                logger.debug(f"Document has title element: {document.querySelector('title') is not None}")
+                title_element = document.querySelector('title')
+                if title_element:
+                    logger.debug(f"Title element text content: {title_element.textContent if hasattr(title_element, 'textContent') else 'No textContent'}")
+                
+                # Check for body
+                logger.debug(f"Document has body element: {document.querySelector('body') is not None}")
+                body_element = document.querySelector('body')
+                if body_element:
+                    logger.debug(f"Body element has text content: {hasattr(body_element, 'textContent')}")
+                    if hasattr(body_element, 'textContent'):
+                        logger.debug(f"Body text content sample: {body_element.textContent[:100] if body_element.textContent else 'Empty'}")
+                        
+                # Attempt to find headings
+                for heading in ('h1', 'h2', 'h3'):
+                    heading_element = document.querySelector(heading)
+                    if heading_element:
+                        logger.debug(f"Found {heading} element with text: {heading_element.textContent if hasattr(heading_element, 'textContent') else 'No textContent'}")
+            except Exception as e:
+                logger.error(f"Error examining document contents: {e}")
+        
+        # Set a flag for debug mode to be used by other methods
+        self.is_debug_mode = is_debug_page
+        
+        # Render the layout tree using the _render_element method
+        try:
+            logger.debug("Starting to render layout tree")
+            self._render_element(self.layout_tree, 0, 0)
+            logger.debug("Layout tree rendered successfully")
+        except Exception as e:
+            logger.error(f"Error rendering layout tree: {e}")
+            self._show_error_message(f"Rendering error: {str(e)}")
         
         # Update scroll region
-        self._update_scroll_region()
+        try:
+            self._update_scroll_region()
+            logger.debug("Scroll region updated")
+        except Exception as e:
+            logger.error(f"Error updating scroll region: {e}")
+        
+        # Only show debug elements on about:debug page
+        if is_debug_page:
+            # Add a debug message showing CSS/JS processing status
+            if not scripts_executed and self.js_engine:
+                debug_text = "⚠️ JavaScript processing issues detected. Scripts may not have executed properly."
+                self.canvas.create_text(10, 10, text=debug_text, anchor="nw", fill="red", font=("Arial", 10, "bold"))
+            
+            # Add a debug rectangle to verify content is being rendered
+            debug_rect = self.canvas.create_rectangle(
+                150, 150, 300, 300,
+                outline="green",
+                fill="yellow",
+                width=3
+            )
+            self.canvas_items.append(debug_rect)
+            
+            # Add some text to verify text rendering works
+            debug_text = self.canvas.create_text(
+                200, 200,
+                text="Example.com content should appear here",
+                font=("Arial", 14, "bold"),
+                fill="black"
+            )
+            self.canvas_items.append(debug_text)
+            
+            # Add a visible header
+            header_rect = self.canvas.create_rectangle(
+                50, 50, 500, 100,
+                outline="blue",
+                fill="#d0e0ff",
+                width=2
+            )
+            self.canvas_items.append(header_rect)
+            
+            header_text = self.canvas.create_text(
+                275, 75,
+                text="DEBUG MODE",
+                font=("Arial", 18, "bold"),
+                fill="navy"
+            )
+            self.canvas_items.append(header_text)
+            
+            # Display renderer and document information
+            debug_info = self.canvas.create_text(
+                275, 400,
+                text=f"Viewport: {self.viewport_width}x{self.viewport_height}\n"
+                     f"Zoom: {self.zoom_level*100}%\n"
+                     f"URL: {document.url if hasattr(document, 'url') else 'Unknown'}\n"
+                     f"Elements: {self._count_elements(document) if document else 0}",
+                font=("Arial", 12),
+                fill="black",
+                justify="center"
+            )
+            self.canvas_items.append(debug_info)
+            
+            logger.debug("Added debug elements in debug mode")
         
         logger.info("Document rendered successfully")
+    
+    # Helper method to count elements in a document
+    def _count_elements(self, document):
+        """Count the number of elements in a document."""
+        if not document or not hasattr(document, 'getElementsByTagName'):
+            return 0
         
+        try:
+            return len(document.getElementsByTagName('*'))
+        except:
+            return 0
+    
+    def _count_elements_manually(self, node):
+        """Manually count elements by recursion."""
+        if not node:
+            return 0
+            
+        # Start with 1 for this element
+        count = 1
+        
+        # Add count from all child elements
+        if hasattr(node, 'child_nodes'):
+            for child in node.child_nodes:
+                if hasattr(child, 'node_type') and child.node_type == NodeType.ELEMENT_NODE:
+                    count += self._count_elements_manually(child)
+        
+        return count
+    
+    def _process_all_styles(self, document: Document) -> None:
+        """
+        Process all CSS styles in the document.
+        
+        Args:
+            document: The document to process styles for
+        """
+        # Reset the CSS parser first to avoid applying styles from previous documents
+        self.css_parser.reset()
+        
+        # Add default styles (lowest precedence)
+        self.css_parser.add_default_styles()
+        
+        # Process <link> elements for external stylesheets
+        if hasattr(document, 'query_selector_all'):
+            link_elements = document.query_selector_all('link[rel="stylesheet"]')
+            if link_elements:
+                for link_element in link_elements:
+                    if hasattr(link_element, 'get_attribute'):
+                        href = link_element.get_attribute('href')
+                        if href:
+                            # If we have the stylesheet content already, use it
+                            if hasattr(link_element, 'stylesheet_content') and link_element.stylesheet_content:
+                                try:
+                                    self.css_parser.parse(link_element.stylesheet_content, document.url)
+                                except Exception as e:
+                                    logger.error(f"Error parsing CSS from linked stylesheet: {e}")
+        
+        # Process <style> elements (higher precedence than linked stylesheets)
+        if hasattr(document, 'query_selector_all'):
+            style_elements = document.query_selector_all('style')
+            if style_elements:
+                for style_element in style_elements:
+                    # First check for style_content property, then fallback to text_content
+                    css_content = None
+                    if hasattr(style_element, 'style_content') and style_element.style_content:
+                        css_content = style_element.style_content
+                        logger.debug(f"Processing <style> element content: {css_content[:100]}...")
+                    elif hasattr(style_element, 'text_content') and style_element.text_content:
+                        css_content = style_element.text_content
+                        logger.debug(f"Processing <style> element text_content: {css_content[:100]}...")
+                    
+                    if css_content:
+                        try:
+                            self.css_parser.parse(css_content)
+                        except Exception as e:
+                            logger.error(f"Error parsing CSS in style element: {e}")
+        
+        # Process style attributes on elements (highest precedence except !important)
+        if hasattr(document, 'query_selector_all'):
+            # Try multiple ways to find elements with style attributes
+            elements_with_style = []
+            try:
+                elements_with_style = document.query_selector_all('[style]')
+            except Exception:
+                # Fallback: iterate through all elements and check for style attribute
+                if hasattr(document, 'get_elements_by_tag_name'):
+                    all_elements = document.get_elements_by_tag_name('*')
+                    elements_with_style = [el for el in all_elements if el.has_attribute('style')]
+            
+            if elements_with_style:
+                for element in elements_with_style:
+                    if hasattr(element, 'get_attribute'):
+                        style_attr = element.get_attribute('style')
+                        if style_attr:
+                            try:
+                                # Store the inline styles directly on the element for higher precedence
+                                element.inline_styles = self.css_parser.parse_inline_styles(style_attr)
+                            except Exception as e:
+                                logger.error(f"Error parsing inline style '{style_attr}': {e}")
+                                
+        # Ensure !important declarations are preserved
+        self._process_important_declarations(document)
+    
+    def _prepare_stacking_contexts(self, layout_box: LayoutBox) -> None:
+        """
+        Prepare stacking contexts for proper z-index handling.
+        This ensures elements are rendered in the correct order based on z-index.
+        
+        Args:
+            layout_box: The root layout box
+        """
+        if not layout_box:
+            return
+            
+        # Sort children by z-index
+        if hasattr(layout_box, 'children') and layout_box.children:
+            layout_box.children.sort(key=lambda child: getattr(child, 'z_index', 0))
+            
+            # Recursively process children
+            for child in layout_box.children:
+                self._prepare_stacking_contexts(child)
+    
+    def _clear_canvas(self) -> None:
+        """Clear the canvas and reset state."""
+        # Delete all canvas items
+        for item_id in self.canvas_items:
+            try:
+                self.canvas.delete(item_id)
+            except TclError:
+                pass  # Item already deleted
+        
+        self.canvas_items = []
+        
+        # Clear the image cache
+        self.image_cache.clear()
+    
+    def _update_scroll_region(self) -> None:
+        """Update the scroll region based on the content size."""
+        try:
+            # Calculate the content bounds
+            if not self.layout_tree:
+                return
+                
+            # Get layout tree bounds
+            min_x = 0
+            min_y = 0
+            max_x = self.viewport_width
+            max_y = self.viewport_height
+            
+            # Use layout tree to determine content size
+            if hasattr(self.layout_tree, 'box_metrics'):
+                # Ensure all values are properly converted to int
+                # Handle 'auto' values and other non-numeric values
+                def safe_int_convert(value, default=0):
+                    """Convert a value to int safely, handling 'auto' and non-numeric values."""
+                    if value == 'auto' or value is None:
+                        return default
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        logger.debug(f"Converting non-numeric value '{value}' to {default}")
+                        return default
+                
+                # Get box metrics with safe conversion
+                x = safe_int_convert(self.layout_tree.box_metrics.x)
+                width = safe_int_convert(self.layout_tree.box_metrics.width, self.viewport_width)
+                margin_right = safe_int_convert(self.layout_tree.box_metrics.margin_right)
+                y = safe_int_convert(self.layout_tree.box_metrics.y)
+                height = safe_int_convert(self.layout_tree.box_metrics.height, self.viewport_height)
+                margin_bottom = safe_int_convert(self.layout_tree.box_metrics.margin_bottom)
+                
+                # Width calculation
+                total_width = x + width + margin_right
+                if total_width > max_x:
+                    max_x = total_width
+
+                # Height calculation                
+                total_height = y + height + margin_bottom
+                if total_height > max_y:
+                    max_y = total_height
+            
+            # Add padding to ensure scrollbar controls are visible
+            max_x += 20
+            max_y += 20
+            
+            # Update the scroll region
+            self.canvas.configure(scrollregion=(min_x, min_y, max_x, max_y))
+            
+            # Configure scrollbars
+            if hasattr(self, 'frame') and hasattr(self.frame, 'horizontal_scrollbar'):
+                if max_x > self.viewport_width:
+                    self.frame.horizontal_scrollbar.grid()
+                else:
+                    self.frame.horizontal_scrollbar.grid_remove()
+                    
+            if hasattr(self, 'frame') and hasattr(self.frame, 'vertical_scrollbar'):
+                if max_y > self.viewport_height:
+                    self.frame.vertical_scrollbar.grid()
+                else:
+                    self.frame.vertical_scrollbar.grid_remove()
+                    
+            logger.debug(f"Scroll region updated to: ({min_x}, {min_y}, {max_x}, {max_y})")
+            
+        except Exception as e:
+            logger.error(f"Error updating scroll region: {e}")
+            
+    def _setup_canvas_bindings(self) -> None:
+        """Set up canvas event bindings for scrolling and interaction."""
+        # Mouse wheel scrolling
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)  # Windows
+        self.canvas.bind("<Button-4>", self._on_mousewheel)    # Linux scroll up
+        self.canvas.bind("<Button-5>", self._on_mousewheel)    # Linux scroll down
+        
+        # Drag scrolling
+        self.canvas.bind("<ButtonPress-1>", self._on_button_press)
+        self.canvas.bind("<B1-Motion>", self._on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_button_release)
+    
+    def _on_mousewheel(self, event) -> None:
+        """Handle mouse wheel scrolling."""
+        # Determine scroll direction and amount
+        if event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
+            # Scroll up
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5 or (hasattr(event, 'delta') and event.delta < 0):
+            # Scroll down
+            self.canvas.yview_scroll(1, "units")
+    
+    def _on_button_press(self, event) -> None:
+        """Handle mouse button press for drag scrolling."""
+        # Store current coordinates for drag scrolling
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+        
+        # Store current scroll position
+        self._drag_scroll_x = self.canvas.canvasx(0)
+        self._drag_scroll_y = self.canvas.canvasy(0)
+        
+        # Change cursor to indicate dragging
+        self.canvas.configure(cursor="fleur")
+    
+    def _on_mouse_drag(self, event) -> None:
+        """Handle mouse dragging for scrolling."""
+        # Calculate distance moved
+        delta_x = event.x - self._drag_start_x
+        delta_y = event.y - self._drag_start_y
+        
+        # Scroll the canvas
+        self.canvas.xview_moveto((self._drag_scroll_x - delta_x) / self.canvas.winfo_width())
+        self.canvas.yview_moveto((self._drag_scroll_y - delta_y) / self.canvas.winfo_height())
+    
+    def _on_button_release(self, event) -> None:
+        """Handle mouse button release after drag scrolling."""
+        # Reset cursor
+        self.canvas.configure(cursor="")
+    
+    def _render_layout_tree(self, layout_tree: LayoutBox) -> None:
+        """
+        Render a layout tree to the canvas.
+        
+        Args:
+            layout_tree: The layout tree to render
+        """
+        if not layout_tree:
+            logger.error("Cannot render null layout tree")
+            
+            # Try fallback direct rendering if we have a document but no layout tree
+            if self.document and hasattr(self.document, 'document_element') and self.document.document_element is not None:
+                logger.warning("Layout tree is null but document exists - attempting fallback direct rendering")
+                self._fallback_direct_render(self.document)
+            return
+        
+        # Store the current layout tree for later use
+        self.current_layout_tree = layout_tree
+            
+        # Clear the canvas
+        self._clear_canvas()
+        
+        # Render the layout tree recursively
+        self._render_element(layout_tree, 0, 0)
+        
+        # Update the scroll region
+        self._update_scroll_region()
+        
+        logger.debug("Document rendered")
+    
     def _fallback_direct_render(self, document):
         """
         Fallback method to render document content directly when normal rendering fails.
@@ -496,101 +977,1302 @@ class HTML5Renderer:
         Args:
             document: The document to render
         """
-        if not document or not hasattr(document, 'document_element'):
-            return
-            
         logger.info("Using fallback direct rendering")
         
-        # Get the body element
-        body = document.getElementsByTagName('body')[0] if document.getElementsByTagName('body') else document.document_element
+        # Clear the canvas
+        self._clear_canvas()
         
-        # Initialize rendering state
-        self.current_y = 10
+        # Get document element
+        if not hasattr(document, 'document_element') or document.document_element is None:
+            self._show_error_message("Document has no content to render")
+            return
+            
+        root = document.document_element
         
-        # Start rendering from body
-        self._fallback_direct_render_element(body)
+        # Extract title
+        title = "Untitled"
+        if hasattr(document, 'title'):
+            title = document.title
+        elif hasattr(document, 'getElementsByTagName'):
+            try:
+                title_elements = document.getElementsByTagName('title')
+                if title_elements and len(title_elements) > 0:
+                    title = title_elements[0].text_content
+            except:
+                pass
+        
+        # Extract body content or use document element if no body
+        body = None
+        if hasattr(document, 'body') and document.body is not None:
+            body = document.body
+        elif hasattr(document, 'getElementsByTagName'):
+            try:
+                body_elements = document.getElementsByTagName('body')
+                if body_elements and len(body_elements) > 0:
+                    body = body_elements[0]
+            except:
+                pass
+        
+        if not body:
+            body = root
+            
+        # Get all visible text content
+        text_content = self._extract_text_content(body)
+        
+        # Render a simple representation of the page
+        x, y = 20, 20
+        
+        # Render title
+        title_text = self.canvas.create_text(
+            x, y, 
+            text=title,
+            font=("Arial", 16, "bold"),
+            anchor="nw",
+            fill="#000000"
+        )
+        self.canvas_items.append(title_text)
+        
+        # Update y position
+        y += 30
+        
+        # Render content
+        content_text = self.canvas.create_text(
+            x, y, 
+            text=text_content[:5000],  # Limit text to avoid performance issues
+            font=("Arial", 12),
+            anchor="nw",
+            fill="#000000",
+            width=self.viewport_width - 40  # Allow wrapping
+        )
+        self.canvas_items.append(content_text)
+        
+        # Update canvas scroll region
+        self._update_scroll_region()
     
+    def _extract_text_content(self, node):
+        """
+        Extract visible text content from a node and its descendants.
+        
+        Args:
+            node: The node to extract text from
+            
+        Returns:
+            Extracted text content
+        """
+        if not node:
+            return ""
+            
+        # Create a unique identifier for this node
+        node_id = f"{id(node)}"
+        
+        # Skip if this node was already processed
+        if node_id in self.processed_nodes:
+            return ""
+        
+        # Mark node as processed
+        self.processed_nodes.add(node_id)
+        
+        # Get direct text content
+        text = ""
+        
+        # Get text from this node
+        if hasattr(node, 'text_content'):
+            text = node.text_content
+        elif hasattr(node, 'textContent'):
+            text = node.textContent
+            
+        # Ensure text is not None
+        if text is None:
+            text = ""
+            
+        # If node is not a text node itself, recursively get text from children
+        if (not text or text.strip() == "") and hasattr(node, 'child_nodes'):
+            for child in node.child_nodes:
+                # Skip script and style elements
+                if hasattr(child, 'tag_name') and child.tag_name.lower() in ['script', 'style']:
+                    continue
+                    
+                child_text = self._extract_text_content(child)
+                if child_text is None:
+                    child_text = ""
+                
+                # Add appropriate spacing between elements
+                if child_text.strip():
+                    if text and not text.endswith('\n'):
+                        # Add newline between block elements
+                        if hasattr(child, 'tag_name') and child.tag_name.lower() in [
+                            'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
+                            'ul', 'ol', 'li', 'table', 'tr', 'blockquote'
+                        ]:
+                            text += '\n'
+                        # Add space between inline elements
+                        elif text and not text.endswith(' '):
+                            text += ' '
+                    
+                    text += child_text
+        
+        return text
+    
+    def _render_element_content(self, layout_box: LayoutBox, x: int, y: int, width: int, height: int) -> None:
+        """
+        Render the content of an element.
+        
+        Args:
+            layout_box: The layout box to render
+            x: X coordinate
+            y: Y coordinate
+            width: Width of the content area
+            height: Height of the content area
+        """
+        element = layout_box.element
+        if not element:
+            return
+            
+        # Get tag name
+        tag_name = element.tag_name.lower() if hasattr(element, 'tag_name') else ""
+        logger.debug(f"Rendering content for element: {tag_name}")
+        
+        # Skip rendering content of certain elements
+        if tag_name == 'script' or tag_name == 'style':
+            logger.debug(f"Skipping content rendering for {tag_name} element")
+            return
+        
+        # Handle different element types
+        if tag_name == 'img':
+            self._render_image(layout_box, x, y, width, height)
+        elif tag_name in ('input', 'button', 'textarea', 'select'):
+            self._render_form_element(layout_box, x, y, width, height)
+        elif tag_name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+            # Special handling for headings to ensure they stand out
+            self._render_heading_element(layout_box)
+        else:
+            # For body element, ensure we process all children
+            if tag_name == 'body':
+                logger.debug(f"Rendering body element with {len(element.child_nodes) if hasattr(element, 'child_nodes') else 0} children")
+                
+                # If body has no visible content, add a placeholder
+                if not self.is_debug_mode and (not hasattr(element, 'child_nodes') or len(element.child_nodes) == 0):
+                    logger.debug("Body has no children, adding placeholder text")
+                    try:
+                        placeholder = self.canvas.create_text(
+                            x + 20, y + 20,
+                            text="This page has no visible content.",
+                            font=("Arial", 14),
+                            fill="#666666",
+                            anchor="nw"
+                        )
+                        self.canvas_items.append(placeholder)
+                    except Exception as e:
+                        logger.error(f"Error adding placeholder text: {e}")
+                
+                # Process all child nodes to ensure they're rendered
+                if hasattr(element, 'child_nodes'):
+                    for i, child in enumerate(element.child_nodes):
+                        if hasattr(child, 'tag_name'):
+                            child_tag = child.tag_name.lower()
+                            logger.debug(f"Body child {i}: {child_tag}")
+                            
+                            # For block elements, ensure they're rendered with proper spacing
+                            if child_tag in ('div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table'):
+                                # These will be rendered by the layout engine through their own layout boxes
+                                pass
+                        elif hasattr(child, 'nodeType') and child.nodeType == 3:  # Text node
+                            # For direct text nodes in the body, render them directly
+                            if hasattr(child, 'nodeValue') and child.nodeValue and child.nodeValue.strip():
+                                logger.debug(f"Direct text node in body: {child.nodeValue[:50]}...")
+                                try:
+                                    text_item = self.canvas.create_text(
+                                        x + 10, y + 10,
+                                        text=child.nodeValue,
+                                        font=("Arial", 12),
+                                        fill="#000000",
+                                        anchor="nw"
+                                    )
+                                    self.canvas_items.append(text_item)
+                                except Exception as e:
+                                    logger.error(f"Error rendering direct text node: {e}")
+            elif tag_name == 'div':
+                # For div elements, ensure we handle them properly
+                logger.debug(f"Rendering div element at ({x}, {y}) with dimensions {width}x{height}")
+                
+                # Check if this is a container div with children but no text
+                has_text = False
+                if hasattr(element, 'textContent'):
+                    has_text = bool(element.textContent.strip())
+                
+                # If it's a container with no text but with children, we don't need to render text
+                if not has_text and hasattr(element, 'child_nodes') and len(element.child_nodes) > 0:
+                    logger.debug("Div is a container with no direct text, skipping text rendering")
+                    return
+            
+            # Render text content for all elements
+            self._render_text_content(layout_box)
+            
+            # Special handling for specific elements
+            if tag_name == 'a':
+                self._make_link_clickable(layout_box, x, y, width, height)
+            elif tag_name == 'hr':
+                self._render_horizontal_rule(layout_box, x, y, width, height)
+            elif tag_name == 'br':
+                # Nothing to do for <br> - layout engine handles line breaks
+                pass
+    
+    def _render_heading_element(self, layout_box: LayoutBox) -> None:
+        """
+        Render a heading element (h1-h6).
+        
+        Args:
+            layout_box: The layout box to render
+        """
+        element = layout_box.element
+        if not element or not hasattr(element, 'tag_name'):
+            return
+            
+        tag_name = element.tag_name.lower()
+        if not tag_name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+            return
+            
+        # Get text content
+        text = ""
+        if hasattr(element, 'textContent'):
+            text = element.textContent
+        elif hasattr(element, 'text_content'):
+            text = element.text_content
+            
+        if not text:
+            return
+            
+        # Get position and dimensions
+        x = layout_box.box_metrics.x
+        y = layout_box.box_metrics.y
+        width = layout_box.box_metrics.width
+        
+        # Get computed style
+        style = layout_box.computed_style if hasattr(layout_box, 'computed_style') else {}
+        
+        # Determine font size and weight based on heading level
+        font_family = style.get('font-family', 'Arial')
+        font_size = 0
+        
+        # Set font size based on heading level
+        if tag_name == 'h1':
+            font_size = 24
+        elif tag_name == 'h2':
+            font_size = 22
+        elif tag_name == 'h3':
+            font_size = 20
+        elif tag_name == 'h4':
+            font_size = 18
+        elif tag_name == 'h5':
+            font_size = 16
+        elif tag_name == 'h6':
+            font_size = 14
+        
+        # Get text color
+        color = style.get('color', '#000000')
+        
+        # Create font tuple
+        font = (font_family, font_size, 'bold')
+        
+        # Create text with proper wrapping
+        try:
+            heading_text = self.canvas.create_text(
+                x, y,
+                text=text,
+                font=font,
+                fill=color,
+                anchor="nw",
+                width=width if width != 'auto' and width > 0 else None
+            )
+            self.canvas_items.append(heading_text)
+            
+            # No longer adding artificial spacers - rely on natural document flow
+            # and the minimal extra spacing in _layout_block_children
+            
+        except Exception as e:
+            logger.error(f"Error rendering heading: {e}")
+    
+    def _render_media_element(self, layout_box: LayoutBox) -> None:
+        """
+        Render a media element (audio or video).
+        
+        Args:
+            layout_box: The layout box to render
+        """
+        element = layout_box.element
+        if not element:
+            return
+            
+        # Get media source
+        src = element.get_attribute('src') if hasattr(element, 'get_attribute') else None
+        
+        # Get box dimensions
+        x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
+        y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
+        width = layout_box.box_metrics.content_width
+        height = layout_box.box_metrics.content_height
+        
+        # Check if controls should be shown
+        has_controls = element.get_attribute('controls') == 'controls' if hasattr(element, 'get_attribute') else False
+        
+        # Check the element type and call the appropriate renderer
+        tag_name = element.tag_name.lower() if hasattr(element, 'tag_name') else ''
+        if tag_name == 'audio':
+            self._render_audio_element(x, y, width, height, src, has_controls, element)
+        elif tag_name == 'video':
+            self._render_video_element(x, y, width, height, src, has_controls, element)
+    
+    def _render_element_box(self, layout_box: LayoutBox) -> None:
+        """
+        Render a specific element box based on its type.
+        
+        Args:
+            layout_box: The layout box to render
+        """
+        element = layout_box.element
+        if not element or not hasattr(element, 'tag_name'):
+            return
+            
+        # First render the container/background for all elements
+        self._render_default_element_box(layout_box)
+        
+        # Note: We no longer call specific render methods here to avoid duplication
+        # The _render_element_content method will handle rendering the specific content
+    
+    def _render_image_element(self, layout_box: LayoutBox) -> None:
+        """
+        Render an image element.
+        
+        Args:
+            layout_box: The layout box to render
+        """
+        element = layout_box.element
+        if not element:
+            return
+            
+        # Get image source
+        src = element.get_attribute('src') if hasattr(element, 'get_attribute') else None
+        if not src:
+            return
+            
+        # Get box dimensions
+        x = layout_box.box_metrics.x + layout_box.box_metrics.margin_left + layout_box.box_metrics.border_left_width + layout_box.box_metrics.padding_left
+        y = layout_box.box_metrics.y + layout_box.box_metrics.margin_top + layout_box.box_metrics.border_top_width + layout_box.box_metrics.padding_top
+        width = layout_box.box_metrics.content_width
+        height = layout_box.box_metrics.content_height
+        
+        # Get parent container dimensions for percentage calculations
+        parent_width = layout_box.parent.box_metrics.content_width if layout_box.parent else self.canvas.winfo_width()
+        parent_height = layout_box.parent.box_metrics.content_height if layout_box.parent else self.canvas.winfo_height()
+        
+        # Convert 'auto' to numeric values
+        if width == 'auto':
+            width = int(parent_width * 0.8)  # Default to 80% of parent width
+        elif isinstance(width, str) and width.endswith('%'):
+            width = self._convert_percentage_to_pixels(width, parent_width)
+        
+        if height == 'auto':
+            height = int(parent_height * 0.32)  # Default to 32% of parent height
+        elif isinstance(height, str) and height.endswith('%'):
+            height = self._convert_percentage_to_pixels(height, parent_height)
+            
+        # Use specified dimensions if provided in element attributes
+        if width <= 0 or isinstance(width, str):
+            width_attr = element.get_attribute('width') if hasattr(element, 'get_attribute') else None
+            if width_attr:
+                if width_attr.endswith('%'):
+                    width = self._convert_percentage_to_pixels(width_attr, parent_width)
+                else:
+                    try:
+                        width = int(float(width_attr))
+                    except (ValueError, TypeError):
+                        width = int(parent_width * 0.8)  # Default to 80% of parent width
+            else:
+                width = int(parent_width * 0.8)  # Default to 80% of parent width
+        
+        if height <= 0 or isinstance(height, str):
+            height_attr = element.get_attribute('height') if hasattr(element, 'get_attribute') else None
+            if height_attr:
+                if height_attr.endswith('%'):
+                    height = self._convert_percentage_to_pixels(height_attr, parent_height)
+                else:
+                    try:
+                        height = int(float(height_attr))
+                    except (ValueError, TypeError):
+                        height = int(parent_height * 0.32)  # Default to 32% of parent height
+            else:
+                height = int(parent_height * 0.32)  # Default to 32% of parent height
+        
+        # Check if we already have the image
+        img = self._get_image(src)
+        
+        if img:
+            # Draw the image on the canvas
+            try:
+                # Create a PhotoImage object
+                photo = tk.PhotoImage(data=img)
+                
+                # Store the photo so it doesn't get garbage collected
+                if not hasattr(self, '_photo_cache'):
+                    self._photo_cache = {}
+                self._photo_cache[src] = photo
+                
+                # Create the image on the canvas
+                image_item = self.canvas.create_image(
+                    x, y,
+                    image=photo,
+                    anchor='nw',
+                    tags=f'element:{element.id}' if hasattr(element, 'id') and element.id else ''
+                )
+                self.canvas_items.append(image_item)
+                
+                # Add debug rectangle to show image bounds
+                if self.draw_debug_boxes:
+                    debug_rect = self.canvas.create_rectangle(
+                        x, y, x + width, y + height,
+                        outline='red',
+                        fill='',
+                        width=1,
+                        tags=f'debug element:{element.id}' if hasattr(element, 'id') and element.id else 'debug'
+                    )
+                    self.canvas_items.append(debug_rect)
+                
+                # Log success
+                logger.debug(f"Rendered image: {src}")
+                return
+            except Exception as e:
+                logger.error(f"Error rendering image: {e}")
+        
+        # If we reached here, we couldn't load the image
+        # Show a placeholder
+        placeholder = self.canvas.create_rectangle(
+            x, y, x + width, y + height,
+            outline='#CCCCCC',
+            fill='#EEEEEE',
+            tags=f'element:{element.id}' if hasattr(element, 'id') and element.id else ''
+        )
+        self.canvas_items.append(placeholder)
+        
+        # Add a broken image icon
+        label = self.canvas.create_text(
+            x + width/2, y + height/2,
+            text="🖼️",
+            font=(self.fonts['default'][0], 14),
+            fill='#999999',
+            tags=f'element:{element.id}' if hasattr(element, 'id') and element.id else ''
+        )
+        self.canvas_items.append(label)
+        
+        # Start loading the image in the background
+        self._start_image_loading(src)
+
+    def _start_image_loading(self, src):
+        """
+        Start loading an image in the background.
+        
+        Args:
+            src: Image source URL
+        """
+        # Create a thread to load the image
+        if not hasattr(self, '_image_loading_threads'):
+            self._image_loading_threads = {}
+            
+        # Skip if already loading
+        if src in self._image_loading_threads and self._image_loading_threads[src].is_alive():
+            return
+            
+        # Create a new thread
+        thread = threading.Thread(target=self._load_image_in_background, args=(src,))
+        thread.daemon = True
+        self._image_loading_threads[src] = thread
+        thread.start()
+        
+    def _load_image_in_background(self, src):
+        """
+        Load an image in the background.
+        
+        Args:
+            src: Image source URL
+        """
+        try:
+            # Try to load the image
+            image_data = self._get_image(src)
+            if image_data:
+                # Schedule a redraw
+                if hasattr(self, 'canvas'):
+                    self.canvas.after(100, self._redraw_images, src)
+        except Exception as e:
+            logger.error(f"Error loading image in background: {e}")
+            
+    def _redraw_images(self, src):
+        """
+        Redraw images after they've been loaded.
+        
+        Args:
+            src: Image source URL
+        """
+        # Find all image elements with this source
+        if not hasattr(self, 'canvas') or not self.canvas:
+            return
+            
+        # Redraw the entire document for now
+        # In a real implementation, would only redraw affected images
+        if hasattr(self, 'layout_tree') and self.layout_tree:
+            self._clear_canvas()
+            self._render_element(self.layout_tree, 0, 0)
+            self._update_scroll_region()
+    
+    def _get_image(self, src):
+        """
+        Get an image from a source URL.
+        
+        Args:
+            src (str): The source URL of the image.
+            
+        Returns:
+            PIL.Image.Image: The image object, or None if the image could not be loaded.
+        """
+        if not src:
+            return None
+            
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Attempting to load image from source: {src}")
+        
+        # Handle data URLs
+        if src.startswith('data:image'):
+            try:
+                # Extract the base64 data
+                header, encoded = src.split(',', 1)
+                import base64
+                from io import BytesIO
+                
+                # Decode the image data
+                decoded = base64.b64decode(encoded)
+                from PIL import Image
+                return Image.open(BytesIO(decoded))
+            except Exception as e:
+                logger.error(f"Failed to decode data URL: {e}")
+                return None
+                
+        # Handle absolute URLs
+        if src.startswith('http://') or src.startswith('https://'):
+            try:
+                # Try to use the network manager if available
+                if hasattr(self, 'network_manager') and self.network_manager:
+                    response = self.network_manager.get(src)
+                    if response and response.content:
+                        from io import BytesIO
+                        from PIL import Image
+                        return Image.open(BytesIO(response.content))
+                
+                # Fallback to direct request
+                import urllib.request
+                from io import BytesIO
+                from PIL import Image
+                
+                with urllib.request.urlopen(src) as response:
+                    image_data = response.read()
+                    return Image.open(BytesIO(image_data))
+            except Exception as e:
+                logger.error(f"Failed to load image from URL {src}: {e}")
+                return None
+                
+        # Handle file URLs
+        if src.startswith('file://'):
+            file_path = src[7:]  # Remove 'file://' prefix
+            if os.path.exists(file_path):
+                try:
+                    from PIL import Image
+                    return Image.open(file_path)
+                except Exception as e:
+                    logger.error(f"Failed to load image from file {file_path}: {e}")
+                    return None
+            else:
+                logger.error(f"File does not exist: {file_path}")
+                return None
+                
+        # Handle relative URLs
+        if self.current_url:
+            from urllib.parse import urljoin, urlparse
+            
+            # If src starts with /, it's relative to the domain root
+            if src.startswith('/'):
+                # Get the domain part of the current URL
+                parsed_url = urlparse(self.current_url)
+                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                absolute_url = urljoin(base_url, src)
+                
+                # For file:// URLs, we need special handling
+                if self.current_url.startswith('file://'):
+                    # For file URLs, resolve against the document root
+                    doc_root = os.path.dirname(urlparse(self.current_url).path)
+                    
+                    # Try different possible locations
+                    possible_paths = [
+                        # Path relative to document root
+                        os.path.normpath(os.path.join(doc_root, src.lstrip('/'))),
+                        
+                        # Path relative to current working directory
+                        os.path.normpath(os.path.join(os.getcwd(), src.lstrip('/'))),
+                        
+                        # Path as is (might be absolute on the filesystem)
+                        src.lstrip('/'),
+                        
+                        # Try with /codename-wink/ in the path
+                        os.path.normpath(os.path.join(doc_root, 'codename-wink', src.lstrip('/'))),
+                        
+                        # Try with the parent directory
+                        os.path.normpath(os.path.join(os.path.dirname(doc_root), src.lstrip('/')))
+                    ]
+                    
+                    for path in possible_paths:
+                        logger.debug(f"Trying to load image from: {path}")
+                        if os.path.exists(path):
+                            try:
+                                from PIL import Image
+                                logger.info(f"Successfully loaded image from: {path}")
+                                return Image.open(path)
+                            except Exception as e:
+                                logger.error(f"Failed to load image from file {path}: {e}")
+                                continue
+                        else:
+                            logger.debug(f"File does not exist: {path}")
+                    
+                    # Try one more approach - look for the image in the current directory structure
+                    try:
+                        image_filename = os.path.basename(src)
+                        for root, dirs, files in os.walk(os.getcwd()):
+                            if image_filename in files:
+                                full_path = os.path.join(root, image_filename)
+                                logger.info(f"Found image by filename search: {full_path}")
+                                from PIL import Image
+                                return Image.open(full_path)
+                    except Exception as e:
+                        logger.error(f"Error during filename search: {e}")
+                    
+                    return None
+                else:
+                    # For http/https URLs
+                    try:
+                        import urllib.request
+                        from io import BytesIO
+                        from PIL import Image
+                        
+                        with urllib.request.urlopen(absolute_url) as response:
+                            image_data = response.read()
+                            return Image.open(BytesIO(image_data))
+                    except Exception as e:
+                        logger.error(f"Failed to load image from URL {absolute_url}: {e}")
+                        return None
+            else:
+                # Regular relative URL (no leading slash)
+                try:
+                    # For file:// URLs, resolve against the directory of the current file
+                    if self.current_url.startswith('file://'):
+                        base_dir = os.path.dirname(urlparse(self.current_url).path)
+                        
+                        # Try different possible locations
+                        possible_paths = [
+                            # Standard relative path
+                            os.path.normpath(os.path.join(base_dir, src)),
+                            
+                            # Relative to current working directory
+                            os.path.normpath(os.path.join(os.getcwd(), src)),
+                            
+                            # Try with /codename-wink/ in the path
+                            os.path.normpath(os.path.join(base_dir, 'codename-wink', src)),
+                            
+                            # Try with the parent directory
+                            os.path.normpath(os.path.join(os.path.dirname(base_dir), src))
+                        ]
+                        
+                        for path in possible_paths:
+                            logger.debug(f"Trying to load image from: {path}")
+                            if os.path.exists(path):
+                                try:
+                                    from PIL import Image
+                                    logger.info(f"Successfully loaded image from: {path}")
+                                    return Image.open(path)
+                                except Exception as e:
+                                    logger.error(f"Failed to load image from file {path}: {e}")
+                                    continue
+                            else:
+                                logger.debug(f"File does not exist: {path}")
+                        
+                        # Try one more approach - look for the image in the current directory structure
+                        try:
+                            image_filename = os.path.basename(src)
+                            for root, dirs, files in os.walk(os.getcwd()):
+                                if image_filename in files:
+                                    full_path = os.path.join(root, image_filename)
+                                    logger.info(f"Found image by filename search: {full_path}")
+                                    from PIL import Image
+                                    return Image.open(full_path)
+                        except Exception as e:
+                            logger.error(f"Error during filename search: {e}")
+                        
+                        return None
+                    else:
+                        # For http/https URLs
+                        absolute_url = urljoin(self.current_url, src)
+                        import urllib.request
+                        from io import BytesIO
+                        from PIL import Image
+                        
+                        with urllib.request.urlopen(absolute_url) as response:
+                            image_data = response.read()
+                            return Image.open(BytesIO(image_data))
+                except Exception as e:
+                    logger.error(f"Failed to load image from relative URL {src}: {e}")
+                    return None
+        
+        # If we get here, we couldn't resolve the image
+        # Try one last approach - look for the image by filename in the current directory structure
+        try:
+            image_filename = os.path.basename(src)
+            for root, dirs, files in os.walk(os.getcwd()):
+                if image_filename in files:
+                    full_path = os.path.join(root, image_filename)
+                    logger.info(f"Found image by filename search: {full_path}")
+                    from PIL import Image
+                    return Image.open(full_path)
+        except Exception as e:
+            logger.error(f"Error during filename search: {e}")
+        
+        logger.error(f"Could not resolve image source: {src}")
+        return None
+    
+    def _render_element(self, layout_box: LayoutBox, x_offset: int = 0, y_offset: int = 0) -> None:
+        """
+        Render a layout box and its children.
+        
+        Args:
+            layout_box: The layout box to render
+            x_offset: X offset for positioning
+            y_offset: Y offset for positioning
+        """
+        if not layout_box or not layout_box.element:
+            return
+            
+        tag_name = layout_box.element.tag_name.lower() if hasattr(layout_box.element, 'tag_name') else 'unknown'
+        
+        # Calculate dimensions safely
+        try:
+            # Calculate width
+            if isinstance(layout_box.box_metrics.content_width, (int, float)):
+                width = layout_box.box_metrics.content_width
+            elif isinstance(layout_box.box_metrics.content_width, str):
+                if layout_box.box_metrics.content_width == 'auto':
+                    # For auto width, use parent's width minus padding and borders
+                    if layout_box.parent:
+                        parent_width = layout_box.parent.box_metrics.content_width
+                        if isinstance(parent_width, (int, float)):
+                            width = parent_width - layout_box.box_metrics.padding_left - layout_box.box_metrics.padding_right - layout_box.box_metrics.border_left_width - layout_box.box_metrics.border_right_width
+                        else:
+                            width = self.viewport_width * 0.8  # Default to 80% of viewport
+                    else:
+                        width = self.viewport_width * 0.8  # Default to 80% of viewport
+                else:
+                    try:
+                        width = int(layout_box.box_metrics.content_width)
+                    except (ValueError, TypeError):
+                        width = self.viewport_width * 0.8  # Default to 80% of viewport
+            else:
+                width = self.viewport_width * 0.8  # Default to 80% of viewport
+
+            # Calculate height
+            if isinstance(layout_box.box_metrics.content_height, (int, float)):
+                height = layout_box.box_metrics.content_height
+            elif isinstance(layout_box.box_metrics.content_height, str):
+                if layout_box.box_metrics.content_height == 'auto':
+                    # For auto height, calculate based on content or use aspect ratio
+                    if layout_box.children:
+                        # Calculate based on children's total height
+                        total_height = 0
+                        for child in layout_box.children:
+                            if isinstance(child.box_metrics.margin_box_height, (int, float)):
+                                total_height += child.box_metrics.margin_box_height
+                        height = total_height if total_height > 0 else int(width * 0.6)  # Use aspect ratio if no height
+                    else:
+                        height = int(width * 0.6)  # Default aspect ratio
+                else:
+                    try:
+                        height = int(layout_box.box_metrics.content_height)
+                    except (ValueError, TypeError):
+                        height = int(width * 0.6)  # Default aspect ratio
+            else:
+                height = int(width * 0.6)  # Default aspect ratio
+        except Exception as e:
+            logger.error(f"Error calculating dimensions: {e}")
+            # Use safe defaults
+            width = self.viewport_width * 0.8
+            height = int(width * 0.6)
+        
+        # Get box metrics
+        if hasattr(layout_box, 'box_metrics'):
+            x = layout_box.box_metrics.x + x_offset
+            y = layout_box.box_metrics.y + y_offset
+            
+            # Log box metrics for debugging
+            logger.debug(f"Box metrics for {tag_name}: x={x}, y={y}, width={width}, height={height}")
+        else:
+            x = getattr(layout_box, 'x', 0) + x_offset
+            y = getattr(layout_box, 'y', 0) + y_offset
+            logger.debug(f"Using fallback positioning for {tag_name}: x={x}, y={y}, width={width}, height={height}")
+            
+        # Get computed style
+        style = layout_box.computed_style if hasattr(layout_box, 'computed_style') else {}
+        
+        # Skip rendering if element is not visible
+        display = style.get('display', 'block')
+        visibility = style.get('visibility', 'visible')
+        
+        if display == 'none' or visibility == 'hidden':
+            logger.debug(f"Skipping invisible element {tag_name}: display={display}, visibility={visibility}")
+            return
+            
+        # Get z-index
+        z_index = style.get('z-index', 'auto')
+        
+        # Render the element's background and border
+        self._render_background(layout_box, x, y, width, height)
+        self._render_border(layout_box, x, y, width, height)
+        
+        # Render the element's content
+        self._render_element_content(layout_box, x, y, width, height)
+        
+        # Render children
+        if hasattr(layout_box, 'children') and layout_box.children:
+            logger.debug(f"Rendering {len(layout_box.children)} children of {tag_name}")
+            for child in layout_box.children:
+                self._render_element(child, x_offset, y_offset)
+        else:
+            logger.debug(f"Element {tag_name} has no children to render")
+    
+    def _render_background(self, layout_box: LayoutBox, x: int, y: int, width: int, height: int) -> None:
+        """
+        Render the background of an element.
+        
+        Args:
+            layout_box: The layout box to render the background for.
+            x: The x coordinate of the top-left corner.
+            y: The y coordinate of the top-left corner.
+            width: The width of the element.
+            height: The height of the element.
+        """
+        if not layout_box or not layout_box.element:
+            return
+            
+        # Get the computed style for the element
+        style = layout_box.computed_style
+        if not style:
+            return
+            
+        # Get the background color
+        bg_color = style.get('background-color', 'transparent')
+        if bg_color == 'transparent':
+            return
+            
+        # Convert the color to a format Tkinter can understand
+        try:
+            # Handle named colors
+            if bg_color in NAMED_COLORS:
+                bg_color = NAMED_COLORS[bg_color]
+                
+            # Handle hex colors
+            if bg_color.startswith('#'):
+                # Ensure it's a valid hex color
+                if len(bg_color) == 4:  # #RGB format
+                    r = bg_color[1] * 2
+                    g = bg_color[2] * 2
+                    b = bg_color[3] * 2
+                    bg_color = f"#{r}{g}{b}"
+                    
+            # Handle rgb() format
+            elif bg_color.startswith('rgb('):
+                # Extract the RGB values
+                rgb_values = bg_color[4:-1].split(',')
+                if len(rgb_values) == 3:
+                    r = int(rgb_values[0].strip())
+                    g = int(rgb_values[1].strip())
+                    b = int(rgb_values[2].strip())
+                    bg_color = f"#{r:02x}{g:02x}{b:02x}"
+                    
+            # Create a rectangle for the background
+            bg_rect = self.canvas.create_rectangle(
+                x, y, x + width, y + height,
+                fill=bg_color,
+                outline=""  # No outline
+            )
+            self.canvas_items.append(bg_rect)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error rendering background: {e}")
+            # Continue with rendering even if background fails
+    
+    def _safe_divide(self, a, b):
+        """
+        Safely divide two values, handling 'auto' strings by converting them to 0.
+        Also handles percentage strings by converting them to proportional values.
+        
+        Args:
+            a: The numerator
+            b: The denominator
+            
+        Returns:
+            The result of a/b, or 0 if either value is 'auto'
+        """
+        # Handle 'auto' values
+        if a == 'auto':
+            a = 0
+        if b == 'auto':
+            b = 0
+        
+        # Handle percentage values
+        if isinstance(a, str) and a.endswith('%'):
+            try:
+                percentage = float(a[:-1]) / 100.0
+                # If we have a parent value, use it to calculate the actual value
+                if isinstance(b, (int, float)) and b > 0:
+                    return percentage * b
+                return percentage
+            except (ValueError, TypeError):
+                a = 0
+        
+        # Ensure both values are numeric
+        try:
+            a = float(a)
+            b = float(b)
+            return a / b if b != 0 else 0
+        except (ValueError, TypeError):
+            return 0
+
+    def _convert_percentage_to_pixels(self, value, parent_dimension):
+        """
+        Convert a percentage value to pixels based on parent dimension.
+        
+        Args:
+            value: The value to convert, can be int, float, or string with % suffix
+            parent_dimension: The parent dimension to base the calculation on
+            
+        Returns:
+            The pixel value as an int
+        """
+        if not value:
+            return 0
+            
+        if isinstance(value, str):
+            # Handle percentage values
+            if value.endswith('%'):
+                try:
+                    percentage = float(value[:-1]) / 100.0
+                    return int(percentage * parent_dimension)
+                except (ValueError, TypeError):
+                    return 0
+            
+            # Handle 'auto' values
+            if value == 'auto':
+                return 0
+            
+            # Handle pixel values
+            if value.endswith('px'):
+                try:
+                    return int(float(value[:-2]))
+                except (ValueError, TypeError):
+                    return 0
+        
+        # Try to convert to int directly if it's not a string
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
+
+    def _process_important_declarations(self, document: Document) -> None:
+        """
+        Process !important declarations and ensure they have highest precedence.
+        
+        Args:
+            document: The document to process
+        """
+        if not hasattr(document, 'query_selector_all'):
+            return
+            
+        # Process all style rules to find !important declarations
+        important_rules = {}
+        
+        # Check default styles for !important
+        for selector, props in self.css_parser.default_style_rules.items():
+            important_props = {}
+            for prop, value in props.items():
+                if isinstance(value, str) and '!important' in value:
+                    important_props[prop] = value.replace('!important', '').strip()
+            
+            if important_props:
+                if selector not in important_rules:
+                    important_rules[selector] = {}
+                important_rules[selector].update(important_props)
+        
+        # Check site styles for !important (higher precedence than default)
+        for stylesheet in self.css_parser.stylesheets:
+            for selector, props in stylesheet.items():
+                important_props = {}
+                for prop, value in props.items():
+                    if isinstance(value, str) and '!important' in value:
+                        important_props[prop] = value.replace('!important', '').strip()
+                
+                if important_props:
+                    if selector not in important_rules:
+                        important_rules[selector] = {}
+                    important_rules[selector].update(important_props)
+        
+        # Store these as a separate collection with highest precedence
+        self.css_parser.important_rules = important_rules
+
+    def _show_error_message(self, message: str) -> None:
+        """
+        Display an error message on the canvas.
+        
+        Args:
+            message: The error message to display
+        """
+        try:
+            # Clear any existing content
+            self._clear_canvas()
+            
+            # Create error container
+            error_bg = self.canvas.create_rectangle(
+                50, 50, self.viewport_width - 50, 150,
+                outline="#ff0000",
+                fill="#ffeeee",
+                width=2
+            )
+            self.canvas_items.append(error_bg)
+            
+            # Create error icon
+            error_icon = self.canvas.create_text(
+                70, 70,
+                text="⚠️",
+                font=("Arial", 24),
+                fill="#ff0000",
+                anchor="nw"
+            )
+            self.canvas_items.append(error_icon)
+            
+            # Create error title
+            error_title = self.canvas.create_text(
+                110, 70,
+                text="Rendering Error",
+                font=("Arial", 16, "bold"),
+                fill="#ff0000",
+                anchor="nw"
+            )
+            self.canvas_items.append(error_title)
+            
+            # Create error message
+            error_text = self.canvas.create_text(
+                70, 100,
+                text=message,
+                font=("Arial", 12),
+                fill="#000000",
+                anchor="nw",
+                width=self.viewport_width - 140
+            )
+            self.canvas_items.append(error_text)
+            
+            # Add a suggestion
+            suggestion = self.canvas.create_text(
+                70, 130,
+                text="Try refreshing the page or check the console for more details.",
+                font=("Arial", 10, "italic"),
+                fill="#666666",
+                anchor="nw"
+            )
+            self.canvas_items.append(suggestion)
+            
+            logger.error(f"Displayed error message: {message}")
+        except Exception as e:
+            logger.error(f"Error displaying error message: {e}")
+
+    def render_elements(self, head: Optional[Element], body: Optional[Element], url: Optional[str] = None) -> None:
+        """
+        Render a page using specific head and body elements.
+        
+        Args:
+            head: The head element containing styles and metadata
+            body: The body element containing page content
+            url: The URL of the document (optional)
+        """
+        logger.debug(f"Rendering page with direct head and body elements")
+        
+        # Log element information
+        logger.debug(f"Head element: {head}")
+        logger.debug(f"Body element: {body}")
+        
+        # Clear any previous content
+        self.clear()
+        
+        # Set current URL if provided
+        if url:
+            logger.debug(f"Setting current_url to: {url}")
+            self.current_url = url
+        
+        # Verify body element exists
+        if not body:
+            logger.error("Cannot render: Body element is missing")
+            self._show_error_message("No body element to render")
+            return
+        
+        # Process CSS from head element
+        if head:
+            logger.debug("Processing CSS from head element")
+            try:
+                # Process styles from <style> elements
+                style_elements = head.get_elements_by_tag_name('style')
+                logger.debug(f"Found {len(style_elements)} style elements in head")
+                
+                # Reset the CSS parser
+                self.css_parser.reset()
+                self.css_parser.add_default_styles()
+                
+                # Process each style element
+                for style_element in style_elements:
+                    if hasattr(style_element, 'text_content') and style_element.text_content:
+                        try:
+                            logger.debug(f"Processing style element content")
+                            self.css_parser.parse(style_element.text_content, self.current_url if hasattr(self, 'current_url') else None)
+                        except Exception as e:
+                            logger.error(f"Error parsing style element: {e}")
+                
+                # Process link elements for external stylesheets
+                link_elements = head.get_elements_by_tag_name('link')
+                for link in link_elements:
+                    if link.get_attribute('rel') == 'stylesheet' and link.get_attribute('href'):
+                        href = link.get_attribute('href')
+                        logger.debug(f"Found stylesheet link: {href}")
+                        if hasattr(link, 'stylesheet_content') and link.stylesheet_content:
+                            try:
+                                self.css_parser.parse(link.stylesheet_content, self.current_url if hasattr(self, 'current_url') else None)
+                            except Exception as e:
+                                logger.error(f"Error parsing linked stylesheet: {e}")
+                
+                logger.debug("CSS styles from head processed successfully")
+            except Exception as e:
+                logger.error(f"Error processing CSS from head: {e}")
+        
+        # Create layout tree for body
+        try:
+            logger.debug("Creating layout tree for body element")
+            self.layout_tree = self.layout_engine.create_layout_for_element(
+                body, 
+                viewport_width=self.viewport_width, 
+                viewport_height=self.viewport_height
+            )
+            logger.debug("Layout tree for body created successfully")
+        except Exception as e:
+            logger.error(f"Error creating layout tree for body: {e}")
+            self._show_error_message(f"Layout error: {str(e)}")
+            
+            # Fall back to direct rendering of body content
+            self._fallback_direct_render_element(body)
+            return
+        
+        # Verify layout tree was created
+        if not self.layout_tree:
+            logger.error("Failed to create layout tree for body")
+            self._fallback_direct_render_element(body)
+            return
+        
+        # Apply layout to the tree
+        try:
+            if hasattr(self.layout_tree, 'layout'):
+                self.layout_tree.layout(self.viewport_width)
+                logger.debug("Applied layout using layout_tree.layout method")
+            else:
+                self.layout_engine.layout(self.layout_tree, self.viewport_width, self.viewport_height)
+                logger.debug("Applied layout using layout_engine.layout method")
+        except Exception as e:
+            logger.error(f"Error during layout: {e}")
+            self._fallback_direct_render_element(body)
+            return
+        
+        # Clear the canvas before rendering
+        self._clear_canvas()
+        
+        # Prepare stacking contexts
+        try:
+            self._prepare_stacking_contexts(self.layout_tree)
+            logger.debug("Stacking contexts prepared")
+        except Exception as e:
+            logger.error(f"Error preparing stacking contexts: {e}")
+            
+        # Render the body's layout tree
+        try:
+            logger.debug("Rendering body element layout tree")
+            self._render_layout_tree(self.layout_tree)
+            logger.debug("Body layout tree rendered successfully")
+        except Exception as e:
+            logger.error(f"Error rendering layout tree: {e}")
+            self._fallback_direct_render_element(body)
+            return
+        
+        logger.info("Page elements rendered successfully")
+        
     def _fallback_direct_render_element(self, element: Element) -> None:
         """
-        Render an element directly without layout calculations.
+        Fallback method to render a single element directly when layout rendering fails.
         
         Args:
             element: The element to render
         """
-        # Skip if already processed
-        if element in self.processed_nodes:
-            return
-            
-        self.processed_nodes.add(element)
+        logger.info(f"Using fallback direct rendering for element: {element.tag_name if hasattr(element, 'tag_name') else 'unknown'}")
         
-        # Handle text nodes
-        if hasattr(element, 'node_type') and element.node_type == 3:  # TEXT_NODE
-            if hasattr(element, 'data') and element.data.strip():
-                text = element.data.strip()
-                if text:
-                    self.canvas.create_text(
-                        10, self.current_y,
-                        text=text,
-                        anchor='w',
-                        font=('Arial', 12)
-                    )
-                    self.current_y += 20
-            return
-            
-        # Handle element nodes
-        if hasattr(element, 'tag_name'):
-            tag_name = element.tag_name.lower()
-            
-            # Handle headings
-            if tag_name.startswith('h') and len(tag_name) == 2:
-                size = {'h1': 24, 'h2': 20, 'h3': 16, 'h4': 14, 'h5': 12, 'h6': 10}.get(tag_name, 12)
-                text = self._extract_text_content(element)
-                if text:
-                    self.canvas.create_text(
-                        10, self.current_y,
-                        text=text,
-                        anchor='w',
-                        font=('Arial', size, 'bold')
-                    )
-                    self.current_y += size + 10
-                    
-            # Handle paragraphs
-            elif tag_name == 'p':
-                text = self._extract_text_content(element)
-                if text:
-                    self.canvas.create_text(
-                        10, self.current_y,
-                        text=text,
-                        anchor='w',
-                        font=('Arial', 12)
-                    )
-                    self.current_y += 20
-                    
-            # Handle links
-            elif tag_name == 'a':
-                href = element.get_attribute('href') if hasattr(element, 'get_attribute') else None
-                text = self._extract_text_content(element)
-                if text:
-                    item = self.canvas.create_text(
-                        10, self.current_y,
-                        text=text,
-                        anchor='w',
-                        font=('Arial', 12),
-                        fill='blue',
-                        underline=True
-                    )
-                    if href:
-                        self.canvas.tag_bind(item, '<Button-1>', lambda e, url=href: self._on_link_click(e, url))
-                    self.current_y += 20
-            
-            # Process child elements for block elements
-            if tag_name in {'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table'}:
-                if hasattr(element, 'child_nodes'):
-                    for child in element.child_nodes:
-                        self._fallback_direct_render_element(child)
-                    # Add extra spacing after block elements
-                    self.current_y += 10
-    
+        # Clear the canvas
+        self._clear_canvas()
+        
+        # Get title if available from parent document
+        title = "Untitled"
+        if hasattr(element, 'owner_document') and element.owner_document:
+            document = element.owner_document
+            if hasattr(document, 'title'):
+                title = document.title
+        
+        # Get text content from the element
+        text_content = self._extract_text_content(element)
+        
+        # Ensure text_content is not None
+        if text_content is None:
+            text_content = "No content available"
+        
+        # Render a simple representation of the element
+        x, y = 20, 20
+        
+        # Render title
+        title_text = self.canvas.create_text(
+            x, y, 
+            text=title,
+            font=("Arial", 16, "bold"),
+            anchor="nw",
+            fill="#000000"
+        )
+        self.canvas_items.append(title_text)
+        
+        # Update y position
+        y += 30
+        
+        # Render content
+        content_text = self.canvas.create_text(
+            x, y, 
+            text=text_content[:5000],  # Limit text to avoid performance issues
+            font=("Arial", 12),
+            anchor="nw",
+            fill="#000000",
+            width=self.viewport_width - 40  # Allow wrapping
+        )
+        self.canvas_items.append(content_text)
+        
+        # Update canvas scroll region
+        self._update_scroll_region()
+
     def _render_horizontal_rule(self, layout_box: LayoutBox, x: int, y: int, width: int, height: int) -> None:
         """
         Render a horizontal rule element.
@@ -1573,244 +3255,3 @@ class HTML5Renderer:
             layout_box.box_metrics.content_width = container_width
             layout_box.box_metrics.content_height = 0
             layout_box._update_box_dimensions()
-
-    def _extract_text_content(self, element) -> str:
-        """
-        Extract text content from an element, handling both direct text nodes and nested elements.
-        
-        Args:
-            element: The element to extract text from
-            
-        Returns:
-            str: The extracted text content
-        """
-        if not element:
-            return ""
-            
-        # Handle text nodes directly
-        if hasattr(element, 'node_type') and element.node_type == 3:  # TEXT_NODE
-            return element.data.strip() if hasattr(element, 'data') else ""
-            
-        # Handle element nodes
-        if not hasattr(element, 'child_nodes'):
-            return ""
-            
-        # Collect text from child nodes
-        text_parts = []
-        for child in element.child_nodes:
-            # Skip if already processed
-            if child in self.processed_nodes:
-                continue
-                
-            # Mark as processed
-            self.processed_nodes.add(child)
-            
-            # Extract text based on node type
-            if hasattr(child, 'node_type'):
-                if child.node_type == 3:  # TEXT_NODE
-                    if hasattr(child, 'data') and child.data.strip():
-                        text_parts.append(child.data.strip())
-                elif child.node_type == 1:  # ELEMENT_NODE
-                    # For inline elements, include their text content
-                    if hasattr(child, 'tag_name') and child.tag_name.lower() in {'span', 'a', 'strong', 'em', 'b', 'i', 'u', 'code'}:
-                        text_parts.append(self._extract_text_content(child))
-                        
-        return " ".join(text_parts).strip()
-
-    def _clear_canvas(self) -> None:
-        """Clear the canvas and reset state."""
-        # Delete all canvas items
-        for item_id in self.canvas_items:
-            try:
-                self.canvas.delete(item_id)
-            except tk.TclError:
-                pass  # Item already deleted
-        
-        self.canvas_items = []
-        self.processed_nodes = set()
-        self.current_y = 10
-        self.image_cache.clear()
-        
-        # Clear the canvas
-        self.canvas.delete("all")
-        
-    def render_elements(self, document: Document, head: Optional[Element] = None, body: Optional[Element] = None, base_url: Optional[str] = None) -> None:
-        """
-        Render document elements directly.
-        
-        Args:
-            document: The document to render
-            head: Optional head element
-            body: Optional body element
-            base_url: Optional base URL for resolving relative URLs
-        """
-        if not document:
-            logger.error("Cannot render null document")
-            return
-            
-        # Clear existing content
-        self._clear_canvas()
-        
-        # Get the body or document element if not provided
-        if not body:
-            if hasattr(document, 'getElementsByTagName'):
-                body_elements = document.getElementsByTagName('body')
-                if body_elements:
-                    body = body_elements[0]
-        
-        if not body and hasattr(document, 'document_element'):
-            body = document.document_element
-            
-        if not body:
-            logger.error("No body or document element found")
-            return
-            
-        # Start rendering from body
-        self._fallback_direct_render_element(body)
-        
-        # Update scroll region
-        self._update_scroll_region()
-
-    def _update_scroll_region(self) -> None:
-        """Update the canvas scroll region based on content."""
-        # Get bounding box of all items
-        bbox = self.canvas.bbox("all")
-        
-        if bbox:
-            # Add some padding
-            padding = 20
-            x1, y1, x2, y2 = bbox
-            x1 = max(0, x1 - padding)
-            y1 = max(0, y1 - padding)
-            x2 += padding
-            y2 += padding
-            
-            # Configure scroll region
-            self.canvas.configure(scrollregion=(x1, y1, x2, y2))
-            
-            # Ensure minimum width and height
-            min_width = max(x2 - x1, self.viewport_width)
-            min_height = max(y2 - y1, self.viewport_height)
-            
-            # Update canvas size if needed
-            self.canvas.configure(width=min_width, height=min_height)
-        else:
-            # If no items, set default scroll region
-            self.canvas.configure(scrollregion=(0, 0, self.viewport_width, self.viewport_height))
-            self.canvas.configure(width=self.viewport_width, height=self.viewport_height)
-
-    def _process_all_styles(self, document: Document) -> None:
-        """
-        Process all styles in the document before rendering.
-        
-        Args:
-            document: The document to process styles for
-        """
-        if not document or not document.document_element:
-            return
-            
-        # Process default styles
-        if self.engine and hasattr(self.engine, 'css_parser'):
-            self.engine.css_parser.add_default_styles()
-            
-        # Process inline styles
-        for element in document.get_elements_by_tag_name('*'):
-            style_attr = element.get_attribute('style')
-            if style_attr:
-                try:
-                    if self.engine and hasattr(self.engine, 'css_parser'):
-                        computed_style = self.engine.css_parser.parse_inline_styles(style_attr)
-                        element.computed_style.update(computed_style)
-                except Exception as e:
-                    logger.error(f"Error processing inline styles: {e}")
-                    
-        # Process stylesheet links
-        for link in document.get_elements_by_tag_name('link'):
-            if (link.get_attribute('rel') == 'stylesheet' and 
-                link.get_attribute('href')):
-                try:
-                    if self.engine:
-                        self.engine.load_stylesheet(link.get_attribute('href'))
-                except Exception as e:
-                    logger.error(f"Error loading stylesheet: {e}")
-                    
-        # Process style elements
-        for style in document.get_elements_by_tag_name('style'):
-            try:
-                if self.engine and hasattr(self.engine, 'css_parser'):
-                    css_text = style.text_content
-                    if css_text:
-                        parsed_styles = self.engine.css_parser.parse(css_text)
-                        # Apply styles to matching elements
-                        for selector, properties in parsed_styles.items():
-                            matching_elements = document.query_selector_all(selector)
-                            for element in matching_elements:
-                                element.computed_style.update(properties)
-            except Exception as e:
-                logger.error(f"Error processing style element: {e}")
-                
-        logger.debug("Styles processed successfully")
-
-    def _render_layout_tree(self, layout_box: LayoutBox) -> None:
-        """
-        Render a layout tree to the canvas.
-        
-        Args:
-            layout_box: The root layout box to render
-        """
-        if not layout_box:
-            logger.error("Cannot render null layout box")
-            return
-            
-        # Skip if already processed
-        if layout_box in self.processed_nodes:
-            return
-            
-        self.processed_nodes.add(layout_box)
-        
-        # Get box metrics
-        x = layout_box.box_metrics.x
-        y = layout_box.box_metrics.y
-        width = layout_box.box_metrics.content_width
-        height = layout_box.box_metrics.content_height
-        
-        # Convert any string dimensions to numbers
-        if isinstance(width, str):
-            width = int(float(width)) if width != 'auto' else self.viewport_width
-        if isinstance(height, str):
-            height = int(float(height)) if height != 'auto' else 0
-            
-        # Render background and borders if present
-        if hasattr(layout_box, 'computed_style'):
-            # Render background
-            bg_color = layout_box.computed_style.get('background-color', '')
-            if bg_color:
-                bg = self.canvas.create_rectangle(
-                    x, y, x + width, y + height,
-                    fill=self._convert_color(bg_color),
-                    outline=''
-                )
-                self.canvas_items.append(bg)
-                
-            # Render borders
-            self._render_border(layout_box, x, y, width, height)
-            
-        # Render content based on element type
-        if layout_box.element:
-            tag_name = layout_box.element.tag_name.lower() if hasattr(layout_box.element, 'tag_name') else ''
-            
-            if tag_name == 'img':
-                self._render_image(layout_box, x, y, width, height)
-            elif tag_name == 'hr':
-                self._render_horizontal_rule(layout_box, x, y, width, height)
-            elif tag_name == 'a':
-                self._make_link_clickable(layout_box, x, y, width, height)
-            elif tag_name in {'input', 'button', 'textarea', 'select'}:
-                self._render_form_element(layout_box, x, y, width, height)
-            else:
-                # Render text content for text-containing elements
-                self._render_text_content(layout_box)
-                
-        # Recursively render children
-        for child in layout_box.children:
-            self._render_layout_tree(child)

@@ -75,140 +75,95 @@ class CSSParser:
             cssutils.css.CSSStyleSheet: Parsed stylesheet
         """
         try:
-            # First try to parse with cssutils
-            sheet = cssutils.parseString(css_content)
+            # Parse the CSS content
+            stylesheet = cssutils.parseString(css_content)
             
-            # If cssutils parsing failed, use manual parsing as fallback
-            if not sheet:
-                logger.info("Using manual CSS parsing as fallback")
-                return self._parse_css_manually(css_content)
-            
-            # Resolve URLs if base_url is provided
+            # Resolve relative URLs if base_url is provided
             if base_url:
-                try:
-                    self._resolve_urls(sheet, base_url)
-                except Exception as url_err:
-                    logger.error(f"Error resolving URLs in CSS: {url_err}")
-            
-            return sheet
+                self.resolve_urls(stylesheet, base_url)
+                
+            return stylesheet
         except Exception as e:
             logger.error(f"Error parsing CSS: {e}")
             # Return an empty stylesheet
             return cssutils.css.CSSStyleSheet()
     
-    def _resolve_urls(self, stylesheet: cssutils.css.CSSStyleSheet, base_url: str) -> None:
+    def resolve_urls(self, stylesheet: cssutils.css.CSSStyleSheet, base_url: str) -> None:
         """
-        Resolve relative URLs in a stylesheet.
+        Resolve relative URLs in a stylesheet to absolute URLs.
         
         Args:
-            stylesheet: CSS stylesheet to process
+            stylesheet: CSS stylesheet
             base_url: Base URL for resolving relative URLs
         """
-        try:
-            # Process each rule in the stylesheet
-            for rule in stylesheet.cssRules:
-                if rule.type == cssutils.css.CSSRule.STYLE_RULE:
-                    # Process each property in the rule
-                    for prop in rule.style:
-                        if prop.name in URL_PROPERTIES:
-                            # Get the URL value
-                            url_value = prop.value
-                            
-                            # Skip if not a URL
-                            if not url_value or not (url_value.startswith('url(') or url_value.startswith('@import')):
-                                continue
-                                
-                            # Extract the URL
-                            if url_value.startswith('url('):
-                                url = url_value[4:-1]  # Remove url() wrapper
-                            else:  # @import
-                                url = url_value.split(' ', 1)[1].strip('"\'')
-                            
-                            # Skip data URLs and absolute URLs
-                            if url.startswith(('data:', 'http://', 'https://', '//')):
-                                continue
-                                
-                            # Resolve relative URL
-                            try:
-                                resolved_url = urllib.parse.urljoin(base_url, url)
-                                # Update the property value with resolved URL
-                                if url_value.startswith('url('):
-                                    prop.value = f'url("{resolved_url}")'
-                                else:  # @import
-                                    prop.value = f'@import "{resolved_url}"'
-                            except Exception as e:
-                                logger.error(f"Error resolving URL {url}: {e}")
-                                
-                elif rule.type == cssutils.css.CSSRule.IMPORT_RULE:
-                    # Handle @import rules
-                    url = rule.href
-                    if not url.startswith(('data:', 'http://', 'https://', '//')):
-                        try:
-                            resolved_url = urllib.parse.urljoin(base_url, url)
-                            rule.href = resolved_url
-                        except Exception as e:
-                            logger.error(f"Error resolving @import URL {url}: {e}")
-                            
-        except Exception as e:
-            logger.error(f"Error resolving URLs in stylesheet: {e}")
+        # Determine if base URL is HTTPS, to ensure we upgrade HTTP URLs when appropriate
+        is_https_base = base_url.startswith('https://')
+        
+        # Process @import rules
+        for rule in stylesheet.cssRules:
+            if rule.type == cssutils.css.CSSRule.IMPORT_RULE:
+                if rule.href:
+                    # Check if it's already an absolute URL
+                    if not rule.href.startswith(('http://', 'https://', 'data:', 'file:')):
+                        # It's a relative URL, resolve it
+                        rule.href = urllib.parse.urljoin(base_url, rule.href)
+                    # If base is HTTPS, ensure the imported CSS is also HTTPS
+                    elif is_https_base and rule.href.startswith('http://'):
+                        rule.href = 'https://' + rule.href[7:]
+            
+            # Process style rules
+            elif rule.type == cssutils.css.CSSRule.STYLE_RULE:
+                for property_name in rule.style:
+                    property_value = rule.style[property_name]
+                    if property_name in URL_PROPERTIES or 'url(' in property_value:
+                        # Replace all URL references
+                        new_value = self._resolve_css_urls(property_value, base_url, is_https_base)
+                        rule.style[property_name] = new_value
+            
+            # Process @font-face rules
+            elif rule.type == cssutils.css.CSSRule.FONT_FACE_RULE:
+                for property_name in rule.style:
+                    if property_name == 'src':
+                        property_value = rule.style[property_name]
+                        # Replace all URL references
+                        new_value = self._resolve_css_urls(property_value, base_url, is_https_base)
+                        rule.style[property_name] = new_value
     
-    def _parse_css_manually(self, css_content: str) -> cssutils.css.CSSStyleSheet:
+    def _resolve_css_urls(self, css_value: str, base_url: str, upgrade_to_https: bool = False) -> str:
         """
-        Parse CSS content manually as a fallback.
+        Resolve URLs in CSS values.
         
         Args:
-            css_content: CSS content to parse
+            css_value: CSS property value
+            base_url: Base URL for resolving relative URLs
+            upgrade_to_https: Whether to upgrade HTTP URLs to HTTPS
             
         Returns:
-            cssutils.css.CSSStyleSheet: Parsed stylesheet
+            str: CSS value with resolved URLs
         """
-        try:
-            # Create an empty stylesheet
-            sheet = cssutils.css.CSSStyleSheet()
-            
-            # Split into rules
-            rules = css_content.split('}')
-            
-            for rule in rules:
-                # Skip empty rules
-                if not rule.strip():
-                    continue
-                    
-                # Split into selector and declarations
-                parts = rule.split('{', 1)
-                if len(parts) != 2:
-                    continue
-                    
-                selector = parts[0].strip()
-                declarations = parts[1].strip()
+        def replace_url(match):
+            url = match.group(1)
+            # Remove quotes if present
+            if url.startswith('"') and url.endswith('"'):
+                url = url[1:-1]
+            elif url.startswith("'") and url.endswith("'"):
+                url = url[1:-1]
                 
-                # Skip if no selector or declarations
-                if not selector or not declarations:
-                    continue
-                    
-                # Create a style rule
-                style_rule = cssutils.css.CSSStyleRule()
-                style_rule.selectorText = selector
+            # Only resolve if not already absolute or special protocol
+            if not url.startswith(('http://', 'https://', 'data:', 'file:', '#')):
+                url = urllib.parse.urljoin(base_url, url)
+            # Upgrade HTTP to HTTPS if requested and the URL is HTTP
+            elif upgrade_to_https and url.startswith('http://'):
+                url = 'https://' + url[7:]
                 
-                # Parse declarations
-                for decl in declarations.split(';'):
-                    if ':' not in decl:
-                        continue
-                        
-                    prop, value = decl.split(':', 1)
-                    prop = prop.strip()
-                    value = value.strip()
-                    
-                    if prop and value:
-                        style_rule.style[prop] = value
+            # Add quotes around the URL if it contains characters that need escaping
+            if ' ' in url or ',' in url or '(' in url or ')' in url:
+                url = f'"{url}"'
                 
-                # Add rule to stylesheet
-                sheet.cssRules.append(style_rule)
-            
-            return sheet
-        except Exception as e:
-            logger.error(f"Error in manual CSS parsing: {e}")
-            return cssutils.css.CSSStyleSheet()
+            return f"url({url})"
+        
+        # Replace URLs in CSS value
+        return re.sub(r'url\(([^)]+)\)', replace_url, css_value)
     
     def extract_styles(self, stylesheet: cssutils.css.CSSStyleSheet) -> Dict[str, Dict[str, str]]:
         """

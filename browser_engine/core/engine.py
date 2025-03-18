@@ -17,7 +17,6 @@ from bs4 import BeautifulSoup
 import html5lib
 import cssutils
 import io
-import base64
 
 from browser_engine.parser.html_parser import HTMLParser
 from browser_engine.parser.css_parser import CSSParser
@@ -411,12 +410,40 @@ class BrowserEngine:
     def _process_stylesheets_thread(self) -> None:
         """Background thread for processing stylesheets."""
         try:
-            # Reset stylesheets list
+            # Process CSS for each stylesheet
             self.stylesheets = []
+            
+            # If in text-only mode, remove style and link[rel=stylesheet] tags from the DOM
+            # to prevent their content from appearing in the plain text output
+            if self.text_only_mode and self.dom:
+                try:
+                    # Remove style tags safely
+                    try:
+                        for style_tag in self.dom.find_all('style'):
+                            try:
+                                style_tag.decompose()
+                            except Exception as tag_error:
+                                logger.warning(f"Error removing style tag: {tag_error}")
+                    except Exception as find_error:
+                        logger.warning(f"Error finding style tags: {find_error}")
+                    
+                    # Remove link tags for stylesheets safely
+                    try:
+                        for link_tag in self.dom.find_all('link', rel='stylesheet'):
+                            try:
+                                link_tag.decompose()
+                            except Exception as tag_error:
+                                logger.warning(f"Error removing stylesheet link tag: {tag_error}")
+                    except Exception as find_error:
+                        logger.warning(f"Error finding stylesheet link tags: {find_error}")
+                    
+                    logger.debug("Removed style and stylesheet link tags in text-only mode")
+                except Exception as e:
+                    logger.error(f"Error processing DOM in text-only mode: {e}")
+                return
             
             # Extract stylesheets from the DOM
             try:
-                # Process inline styles
                 style_tags = self.html_parser.get_elements_by_tag(self.dom, "style")
                 for style in style_tags:
                     css_text = style.string
@@ -425,55 +452,135 @@ class BrowserEngine:
                         if parsed_css:
                             self.stylesheets.append(parsed_css)
                             logger.debug(f"Parsed inline CSS stylesheet: {len(css_text)} bytes")
-            
-                # Process external stylesheets
-                link_tags = self.html_parser.get_elements_by_tag(self.dom, "link")
-                for link in link_tags:
-                    rel = link.getAttribute("rel")
-                    if not rel or rel.lower() != "stylesheet":
-                        continue
-                        
-                    href = link.getAttribute("href")
-                    if not href:
-                        continue
-                        
-                    # Resolve relative URLs
-                    if not href.startswith(('http://', 'https://', 'data:', '//')):
-                        href = urllib.parse.urljoin(self.dom.url, href)
-                    
-                    # Check cache first
-                    if not self.private_mode:
-                        cached_css = self.cache.get(href)
-                        if cached_css:
-                            parsed_css = self.css_parser.parse(cached_css)
-                            if parsed_css:
-                                self.stylesheets.append(parsed_css)
-                                logger.debug(f"Loaded cached CSS from {href}")
-                            continue
-                    
-                    # Load from network
-                    try:
-                        logger.debug(f"Fetching external CSS from {href}")
-                        css_content = self.network.fetch(href, resource_type="style")
-                        
-                        if css_content:
-                            # Cache the CSS if not in private mode
-                            if not self.private_mode:
-                                self.cache.set(href, css_content)
-                            
-                            # Parse the CSS
-                            parsed_css = self.css_parser.parse(css_content)
-                            if parsed_css:
-                                self.stylesheets.append(parsed_css)
-                                logger.debug(f"Parsed external CSS: {len(css_content)} bytes")
-                        else:
-                            logger.warning(f"Failed to fetch CSS from {href}")
-                    except Exception as e:
-                        logger.error(f"Error loading external stylesheet {href}: {e}")
             except Exception as e:
                 logger.error(f"Error extracting stylesheets from DOM: {e}")
+            
+            # Extract external stylesheets
+            try:
+                link_tags = self.dom.select("link[rel='stylesheet']")
+                for link in link_tags:
+                    href = link.get("href")
+                    if href:
+                        # Skip data URLs for now
+                        if href.startswith("data:"):
+                            continue
+                            
+                        # Resolve the URL
+                        if not href.startswith(("http://", "https://")):
+                            if self.current_url:
+                                href = urllib.parse.urljoin(self.current_url, href)
+                        
+                        # Try to load from cache first
+                        cached_css = self.cache.get(href)
+                        if cached_css:
+                            logger.debug(f"Using cached CSS from {href}")
+                            if isinstance(cached_css, bytes):
+                                try:
+                                    css_text = cached_css.decode('utf-8', errors='replace')
+                                except Exception as e:
+                                    logger.warning(f"Error decoding cached CSS: {e}")
+                                    continue
+                            else:
+                                css_text = cached_css
+                                
+                            parsed_css = self.css_parser.parse(css_text)
+                            if parsed_css:
+                                self.stylesheets.append(parsed_css)
+                                logger.debug(f"Parsed external CSS from cache: {len(css_text)} bytes")
+                        else:
+                            # Load from network
+                            try:
+                                logger.debug(f"Fetching external CSS from {href}")
+                                response = self.network.get(href)
+                                
+                                # Check if it's actually CSS
+                                content_type = response.headers.get('Content-Type', '').lower()
+                                if not content_type.startswith(('text/css', 'text/plain')):
+                                    logger.warning(f"External stylesheet has non-CSS content type: {content_type}")
+                                
+                                # Use text_decoded for proper encoding handling
+                                css_text = response.text_decoded
+                                
+                                # Cache the CSS
+                                if not self.private_mode:
+                                    self.cache.set(href, css_text)
+                                
+                                # Parse the CSS
+                                parsed_css = self.css_parser.parse(css_text)
+                                if parsed_css:
+                                    self.stylesheets.append(parsed_css)
+                                    logger.debug(f"Parsed external CSS: {len(css_text)} bytes")
+                            except Exception as e:
+                                logger.error(f"Error loading external stylesheet {href}: {e}")
+            except Exception as e:
+                logger.error(f"Error extracting external stylesheets: {e}")
+            
+            # Process @import rules in stylesheets
+            try:
+                imported_stylesheets = []
+                for stylesheet in self.stylesheets:
+                    # Use the helper method to get all @import rules
+                    import_rules = self.css_parser.get_import_rules(stylesheet)
+                    for import_rule in import_rules:
+                        # Extract the URL from the import rule
+                        url = import_rule.href
+                        
+                        # Skip data URLs
+                        if url.startswith("data:"):
+                            continue
+                            
+                        # Resolve the URL
+                        if not url.startswith(("http://", "https://")):
+                            if self.current_url:
+                                url = urllib.parse.urljoin(self.current_url, url)
+                        
+                        # Try to load from cache first
+                        cached_import_css = self.cache.get(url)
+                        if cached_import_css:
+                            logger.debug(f"Using cached imported CSS from {url}")
+                            if isinstance(cached_import_css, bytes):
+                                try:
+                                    import_css_text = cached_import_css.decode('utf-8', errors='replace')
+                                except Exception as e:
+                                    logger.warning(f"Error decoding cached imported CSS: {e}")
+                                    continue
+                            else:
+                                import_css_text = cached_import_css
+                                
+                            parsed_import_css = self.css_parser.parse(import_css_text)
+                            if parsed_import_css:
+                                imported_stylesheets.append(parsed_import_css)
+                                logger.debug(f"Parsed imported CSS from cache: {len(import_css_text)} bytes")
+                        else:
+                            # Load from network
+                            try:
+                                logger.debug(f"Fetching imported CSS from {url}")
+                                response = self.network.get(url)
+                                
+                                # Use text_decoded for proper encoding handling
+                                import_css_text = response.text_decoded
+                                
+                                # Cache the CSS
+                                if not self.private_mode:
+                                    self.cache.set(url, import_css_text)
+                                
+                                # Parse the CSS
+                                parsed_import_css = self.css_parser.parse(import_css_text)
+                                if parsed_import_css:
+                                    imported_stylesheets.append(parsed_import_css)
+                                    logger.debug(f"Parsed imported CSS: {len(import_css_text)} bytes")
+                            except Exception as e:
+                                logger.error(f"Error loading imported stylesheet {url}: {e}")
+                
+                # Add imported stylesheets to the main list
+                if imported_stylesheets:
+                    self.stylesheets.extend(imported_stylesheets)
+            except Exception as e:
+                logger.error(f"Error processing @import rules: {e}")
+            
+            logger.debug(f"Processed {len(self.stylesheets)} total stylesheets")
         except Exception as e:
-            logger.error(f"Error in stylesheet processing thread: {e}")
+            logger.error(f"Error processing stylesheets: {e}")
     
     def _load_resources(self, base_url: str) -> None:
         """
@@ -525,8 +632,6 @@ class BrowserEngine:
                 
                 # Check if already loaded
                 if abs_url in self.resources['images']:
-                    # Update the image element with the cached content
-                    img['src'] = f"data:image/*;base64,{base64.b64encode(self.resources['images'][abs_url]['data']).decode('utf-8')}"
                     continue
                     
                 logger.debug(f"Loading image: {abs_url}")
@@ -541,8 +646,6 @@ class BrowserEngine:
                             'content_type': 'image/*',  # Assume image
                             'from_cache': True
                         }
-                        # Update the image element with the cached content
-                        img['src'] = f"data:image/*;base64,{base64.b64encode(cached_image).decode('utf-8')}"
                     else:
                         # Try to load the image directly first without HEAD request
                         # since some servers might block HEAD requests
@@ -553,7 +656,32 @@ class BrowserEngine:
                             content_type = response.headers.get('Content-Type', '')
                             if not content_type.startswith('image/'):
                                 logger.warning(f"Resource {abs_url} is not an image (content-type: {content_type})")
-                                continue
+                                
+                                # Try an alternative URL if it's a well-known resource
+                                if 'google.com' in base_url and 'googlelogo' in abs_url:
+                                    # Try common Google image paths
+                                    alt_urls = [
+                                        'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png',
+                                        'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_160x56dp.png',
+                                        'https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png'
+                                    ]
+                                    
+                                    for alt_url in alt_urls:
+                                        try:
+                                            alt_response = self.network.get(alt_url)
+                                            alt_content_type = alt_response.headers.get('Content-Type', '')
+                                            
+                                            if alt_content_type.startswith('image/'):
+                                                # Found a working alternative
+                                                response = alt_response
+                                                content_type = alt_content_type
+                                                abs_url = alt_url
+                                                logger.info(f"Used alternative Google logo URL: {alt_url}")
+                                                break
+                                        except Exception:
+                                            continue
+                                else:
+                                    continue
                             
                             # Cache the response
                             if not self.private_mode:
@@ -564,8 +692,6 @@ class BrowserEngine:
                                 'content_type': content_type,
                                 'from_cache': False
                             }
-                            # Update the image element with the downloaded content
-                            img['src'] = f"data:{content_type};base64,{base64.b64encode(response.content).decode('utf-8')}"
                         except Exception as e:
                             logger.warning(f"Error getting image {abs_url}: {e}")
                 except Exception as e:
@@ -642,8 +768,6 @@ class BrowserEngine:
                         
                     # Check if already loaded
                     if abs_poster_url in self.resources['images']:
-                        # Update the video poster with the cached content
-                        video['poster'] = f"data:image/*;base64,{base64.b64encode(self.resources['images'][abs_poster_url]['data']).decode('utf-8')}"
                         continue
                     
                     logger.debug(f"Loading video poster: {abs_poster_url}")
@@ -658,8 +782,6 @@ class BrowserEngine:
                                 'content_type': 'image/*',  # Assume image
                                 'from_cache': True
                             }
-                            # Update the video poster with the cached content
-                            video['poster'] = f"data:image/*;base64,{base64.b64encode(cached_poster).decode('utf-8')}"
                         else:
                             # Make the request
                             response = self.network.get(abs_poster_url)
@@ -673,8 +795,6 @@ class BrowserEngine:
                                 'content_type': response.headers.get('Content-Type', 'image/*'),
                                 'from_cache': False
                             }
-                            # Update the video poster with the downloaded content
-                            video['poster'] = f"data:{response.headers.get('Content-Type', 'image/*')};base64,{base64.b64encode(response.content).decode('utf-8')}"
                     except Exception as e:
                         logger.warning(f"Error loading video poster {abs_poster_url}: {e}")
             
@@ -787,13 +907,6 @@ class BrowserEngine:
                             
                         # Check if already loaded
                         if abs_bg_url in self.resources['images']:
-                            # Update the element's style with the cached content
-                            data_url = f"data:{self.resources['images'][abs_bg_url]['content_type']};base64,{base64.b64encode(self.resources['images'][abs_bg_url]['data']).decode('utf-8')}"
-                            element['style'] = re.sub(
-                                r'background-image:\s*url\([\'"]?[^\'"]+[\'"]?\)',
-                                f'background-image: url("{data_url}")',
-                                style
-                            )
                             continue
                             
                         logger.debug(f"Loading background image: {abs_bg_url}")
@@ -808,13 +921,6 @@ class BrowserEngine:
                                     'content_type': 'image/*',  # Assume image
                                     'from_cache': True
                                 }
-                                # Update the element's style with the cached content
-                                data_url = f"data:image/*;base64,{base64.b64encode(cached_bg).decode('utf-8')}"
-                                element['style'] = re.sub(
-                                    r'background-image:\s*url\([\'"]?[^\'"]+[\'"]?\)',
-                                    f'background-image: url("{data_url}")',
-                                    style
-                                )
                             else:
                                 # Make the request
                                 response = self.network.get(abs_bg_url)
@@ -828,13 +934,6 @@ class BrowserEngine:
                                     'content_type': response.headers.get('Content-Type', 'image/*'),
                                     'from_cache': False
                                 }
-                                # Update the element's style with the downloaded content
-                                data_url = f"data:{response.headers.get('Content-Type', 'image/*')};base64,{base64.b64encode(response.content).decode('utf-8')}"
-                                element['style'] = re.sub(
-                                    r'background-image:\s*url\([\'"]?[^\'"]+[\'"]?\)',
-                                    f'background-image: url("{data_url}")',
-                                    style
-                                )
                         except Exception as e:
                             logger.warning(f"Error loading background image {abs_bg_url}: {e}")
             except Exception as e:
@@ -876,9 +975,6 @@ class BrowserEngine:
                                 
                             # Check if already loaded
                             if abs_url in self.resources['fonts']:
-                                # Update the font-face rule with the cached content
-                                data_url = f"data:{self.resources['fonts'][abs_url]['content_type']};base64,{base64.b64encode(self.resources['fonts'][abs_url]['data']).decode('utf-8')}"
-                                font_face_rule.style['src'] = font_face_rule.style['src'].replace(url, data_url)
                                 continue
                                 
                             logger.debug(f"Loading font: {abs_url}")
@@ -893,9 +989,6 @@ class BrowserEngine:
                                         'content_type': 'font/*',  # Assume font
                                         'from_cache': True
                                     }
-                                    # Update the font-face rule with the cached content
-                                    data_url = f"data:font/*;base64,{base64.b64encode(cached_font).decode('utf-8')}"
-                                    font_face_rule.style['src'] = font_face_rule.style['src'].replace(url, data_url)
                                 else:
                                     # Make the request
                                     response = self.network.get(abs_url)
@@ -909,9 +1002,6 @@ class BrowserEngine:
                                         'content_type': response.headers.get('Content-Type', 'font/*'),
                                         'from_cache': False
                                     }
-                                    # Update the font-face rule with the downloaded content
-                                    data_url = f"data:{response.headers.get('Content-Type', 'font/*')};base64,{base64.b64encode(response.content).decode('utf-8')}"
-                                    font_face_rule.style['src'] = font_face_rule.style['src'].replace(url, data_url)
                             except Exception as e:
                                 logger.warning(f"Error loading font {abs_url}: {e}")
             except Exception as e:
@@ -1302,13 +1392,6 @@ class BrowserEngine:
             url: Base URL for resolving relative URLs
         """
         try:
-            # Clear previous state
-            self.dom = None
-            self.page_title = None
-            self.load_progress = 0
-            self.is_loading = True
-            self._notify_loading_state()
-            
             # Parse HTML
             self.load_progress = 60
             self._notify_loading_state()
@@ -1320,18 +1403,18 @@ class BrowserEngine:
             title_tag = self.dom.find('title')
             self.page_title = title_tag.text if title_tag else url
             
-            # Download resources (images, etc.) unless in text-only mode
-            text_only_mode = getattr(self, 'text_only_mode', False)
-            if not text_only_mode:
-                self.load_progress = 70
-                self._notify_loading_state()
-                self._load_resources(url)
-            
-            # Process stylesheets after resources are loaded
-            self.load_progress = 80
+            # Process stylesheets
+            self.load_progress = 70
             self._notify_loading_state()
             self._process_stylesheets()
             
+            # Download resources (images, etc.) unless in text-only mode
+            text_only_mode = getattr(self, 'text_only_mode', False)
+            if not text_only_mode:
+                self.load_progress = 80
+                self._notify_loading_state()
+                self._load_resources(url)
+                
             # Execute JavaScript unless in text-only mode or JavaScript is disabled
             js_disabled = getattr(self, 'js_disabled', False)
             if not text_only_mode and not js_disabled:

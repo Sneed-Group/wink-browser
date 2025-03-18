@@ -12,7 +12,7 @@ from typing import Dict, Optional, Tuple, Union, List, Callable
 import tkinter as tk
 from tkinter import ttk
 
-from ..dom import Document, SelectorEngine, MarkdownDOMCreator
+from ..dom import Document, SelectorEngine
 from ..css import CSSParser, LayoutEngine
 from ..rendering import HTML5Renderer
 from ..js import JSEngine
@@ -50,7 +50,6 @@ class HTML5Engine:
         self.selector_engine = SelectorEngine()
         self.layout_engine = LayoutEngine()
         self.js_engine = JSEngine()
-        self.markdown_dom_creator = MarkdownDOMCreator()
         
         # The renderer will be initialized later when a parent frame is available
         self.renderer = None
@@ -62,9 +61,6 @@ class HTML5Engine:
         self.on_load_handlers = []
         self.on_error_handlers = []
         
-        # Track rendering state
-        self.is_rendering = False
-        
         self.logger.info("HTML5Engine initialized with viewport %dx%d", width, height)
     
     def initialize_renderer(self, parent_frame: ttk.Frame) -> None:
@@ -75,8 +71,6 @@ class HTML5Engine:
             parent_frame: Parent Tkinter frame for rendering
         """
         self.renderer = HTML5Renderer(parent_frame)
-        # Set the engine reference in the renderer
-        self.renderer.set_engine(self)
         self.logger.info("HTML5Renderer initialized")
     
     def load_html(self, html_content: str, base_url: str = None) -> Document:
@@ -95,8 +89,11 @@ class HTML5Engine:
         # Store the base_url in the engine
         self.base_url = base_url
         
-        # Create a new document using the markdown DOM creator
-        self.document = self.markdown_dom_creator.create_dom(html_content, base_url)
+        # Create a new document
+        self.document = Document()
+        
+        # Parse HTML into the document
+        self.document.parse_html(html_content)
         
         # Store base URL in document
         self.document.base_url = base_url
@@ -447,9 +444,6 @@ class HTML5Engine:
             
         self.logger.info("Processing stylesheets")
         
-        # Initialize default styles
-        self.css_parser.add_default_styles()
-        
         # Process inline styles
         try:
             elements_with_style = self._find_elements_with_attribute(self.document, "style")
@@ -722,36 +716,6 @@ class HTML5Engine:
             self.logger.error(f"Error calculating layout: {str(e)}")
             self._trigger_error(f"Layout calculation error: {str(e)}")
     
-    def _process_css(self) -> None:
-        """Process CSS for all elements in the document."""
-        if not self.document:
-            return
-            
-        # Process CSS for each element
-        def process_element(element):
-            # Skip non-element nodes
-            if not hasattr(element, 'node_type') or element.node_type != 1:  # ELEMENT_NODE
-                return
-                
-            # Get computed style for the element
-            if hasattr(element, 'get_computed_style'):
-                computed_style = element.get_computed_style()
-                if computed_style:
-                    # Store computed style on the element
-                    if not hasattr(element, 'computed_style'):
-                        element.computed_style = {}
-                    element.computed_style.update(computed_style)
-            
-            # Process children
-            if hasattr(element, 'child_nodes'):
-                for child in element.child_nodes:
-                    process_element(child)
-        
-        # Start processing from the document root
-        process_element(self.document)
-        
-        self.logger.debug("CSS processing completed")
-    
     def _render(self) -> None:
         """Render the document."""
         if not self.document:
@@ -770,23 +734,11 @@ class HTML5Engine:
             self.logger.error("Cannot render: renderer is not initialized")
             return
             
-        # Prevent re-entry during rendering
-        if self.is_rendering:
-            self.logger.warning("Render already in progress, skipping")
-            return
-            
-        self.is_rendering = True
         self.logger.info("Rendering document")
         
+        # Clear the renderer
         try:
-            # Only clear the renderer once at the start
             self.renderer.clear()
-            
-            # Process all CSS first
-            try:
-                self._process_css()
-            except Exception as e:
-                self.logger.error(f"Error processing CSS: {e}")
             
             # Render the document using the calculated layout
             self.logger.debug(f"Passing layout_tree to renderer: {self.layout_tree}")
@@ -798,8 +750,6 @@ class HTML5Engine:
         except Exception as e:
             self.logger.error(f"Error rendering document: {str(e)}")
             self._trigger_error(f"Rendering error: {str(e)}")
-        finally:
-            self.is_rendering = False
     
     def _trigger_load(self) -> None:
         """Trigger load event handlers."""
@@ -827,62 +777,4 @@ class HTML5Engine:
             try:
                 handler(error_message)
             except Exception as e:
-                self.logger.error("Error in error handler: %s", str(e))
-
-    def _preload_resources(self) -> None:
-        """Preload external resources like images, scripts, and stylesheets."""
-        if not self.document:
-            return
-        
-        processed_urls = set()
-        
-        # Get base URL from document
-        base_url = self.document.url if hasattr(self.document, 'url') else None
-        if not base_url:
-            self.logger.warning("No base URL available for resource loading")
-            return
-        
-        # Process link elements (stylesheets)
-        link_elements = self.document.querySelectorAll("link[rel='stylesheet']")
-        for link in link_elements:
-            href = link.getAttribute("href")
-            if not href or href in processed_urls:
-                continue
-            
-            processed_urls.add(href)
-            
-            # Skip if already loaded
-            if href in self.resources:
-                continue
-            
-            # Resolve URL
-            try:
-                # Handle absolute URLs
-                if href.startswith(('http://', 'https://', 'data:', '//')):
-                    full_url = href
-                else:
-                    # Handle relative URLs
-                    full_url = urllib.parse.urljoin(base_url, href)
-                    
-                    # Validate the URL
-                    parsed_url = urllib.parse.urlparse(full_url)
-                    if not parsed_url.scheme or not parsed_url.netloc:
-                        self.logger.warning(f"Invalid URL after resolution: {full_url}")
-                        continue
-                
-                # Request stylesheet
-                try:
-                    # Import here to avoid circular imports
-                    from browser_engine.network.network_manager import NetworkManager
-                    
-                    # Use network manager to fetch resource
-                    css_content = NetworkManager().fetch(full_url, resource_type="style")
-                    if css_content:
-                        self.resources[href] = css_content.encode('utf-8')
-                        self.logger.debug(f"Stylesheet loaded: {href}")
-                    else:
-                        self.logger.warning(f"Failed to load stylesheet: {href}")
-                except Exception as e:
-                    self.logger.error(f"Error loading stylesheet {href}: {e}")
-            except Exception as e:
-                self.logger.error(f"Error resolving URL {href}: {e}") 
+                self.logger.error("Error in error handler: %s", str(e)) 
