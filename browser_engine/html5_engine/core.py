@@ -58,6 +58,10 @@ class HTML5Engine:
         self.on_title_change_callback = None
         self.on_link_click_callback = None
         
+        # Initialize CSS state
+        self.css_parser.reset()  # Reset CSS parser state
+        self.css_parser.add_default_styles()  # Add default styles
+        
         logger.info("HTML5 Engine initialized")
     
     def attach_renderer(self, renderer: HTML5Renderer) -> None:
@@ -665,59 +669,27 @@ class HTML5Engine:
                             logger.warning(f"Style element has no valid content")
                             continue
                         
-                        # Use a simple regex to extract CSS rules
-                        css_rules = {}
-                        import re
-                        rule_pattern = r'([^{]+){([^}]*)}'
-                        matches = re.findall(rule_pattern, css_content)
-                        
-                        for selector, declarations in matches:
-                            selector = selector.strip()
-                            if not selector:
-                                continue
-                                
-                            # Parse declarations
-                            props = {}
-                            for decl in declarations.split(';'):
-                                if ':' not in decl:
-                                    continue
-                                    
-                                prop, val = decl.split(':', 1)
-                                prop = prop.strip()
-                                val = val.strip()
-                                
-                                if prop and val:
-                                    props[prop] = val
-                            
-                            if props:
-                                css_rules[selector] = props
+                        # Parse the CSS content
+                        parsed_rules = self.css_parser.parse(css_content)
                         
                         # Add these rules to the CSS parser
-                        if css_rules:
+                        if parsed_rules:
                             # Add to stylesheets list
-                            self.css_parser.stylesheets.append(css_rules)
+                            self.css_parser.stylesheets.append(parsed_rules)
                             
                             # Update the combined style_rules
-                            for selector, props in css_rules.items():
+                            for selector, props in parsed_rules.items():
                                 if selector in self.css_parser.style_rules:
                                     self.css_parser.style_rules[selector].update(props)
                                 else:
                                     self.css_parser.style_rules[selector] = props.copy()
-                    except AttributeError as attr_err:
-                        if "'str' object has no attribute 'type'" in str(attr_err):
-                            # This is the specific error we're trying to handle
-                            # Just log it and continue
-                            logger.debug("Ignoring 'str' object has no attribute 'type' error")
-                        else:
-                            # Log other attribute errors
-                            logger.error(f"Error processing individual style element: {attr_err}")
-                    except Exception as element_err:
-                        logger.error(f"Error processing individual style element: {element_err}")
+                                    
+                    except Exception as e:
+                        logger.error(f"Error processing style element: {e}")
+                        continue
                         
-                logger.info("Processing style elements completed")
-            except Exception as style_err:
-                # Log specific error for style element processing
-                logger.error(f"Error processing style elements: {style_err}")
+            except Exception as e:
+                logger.error(f"Error processing style elements: {e}")
             
             # Process link elements (external stylesheets)
             try:
@@ -740,7 +712,7 @@ class HTML5Engine:
                 if self.document.document_element:
                     find_link_elements(self.document.document_element)
                 
-                processed_urls = set()  # Track processed URLs to avoid duplicates
+                processed_urls = set()
                 
                 for link_element in link_elements:
                     try:
@@ -760,40 +732,16 @@ class HTML5Engine:
                             try:
                                 css_content = self.resources[href].decode('utf-8', errors='replace')
                                 if css_content and css_content.strip():
-                                    # Use a simple regex to extract CSS rules
-                                    css_rules = {}
-                                    import re
-                                    rule_pattern = r'([^{]+){([^}]*)}'
-                                    matches = re.findall(rule_pattern, css_content)
-                                    
-                                    for selector, declarations in matches:
-                                        selector = selector.strip()
-                                        if not selector:
-                                            continue
-                                            
-                                        # Parse declarations
-                                        props = {}
-                                        for decl in declarations.split(';'):
-                                            if ':' not in decl:
-                                                continue
-                                                
-                                            prop, val = decl.split(':', 1)
-                                            prop = prop.strip()
-                                            val = val.strip()
-                                            
-                                            if prop and val:
-                                                props[prop] = val
-                                        
-                                        if props:
-                                            css_rules[selector] = props
+                                    # Parse the CSS content
+                                    parsed_rules = self.css_parser.parse(css_content)
                                     
                                     # Add these rules to the CSS parser
-                                    if css_rules:
+                                    if parsed_rules:
                                         # Add to stylesheets list
-                                        self.css_parser.stylesheets.append(css_rules)
+                                        self.css_parser.stylesheets.append(parsed_rules)
                                         
                                         # Update the combined style_rules
-                                        for selector, props in css_rules.items():
+                                        for selector, props in parsed_rules.items():
                                             if selector in self.css_parser.style_rules:
                                                 self.css_parser.style_rules[selector].update(props)
                                             else:
@@ -817,40 +765,16 @@ class HTML5Engine:
                                     self.resources[href] = css_content.encode('utf-8')
                                     
                                     if css_content and css_content.strip():
-                                        # Use a simple regex to extract CSS rules
-                                        css_rules = {}
-                                        import re
-                                        rule_pattern = r'([^{]+){([^}]*)}'
-                                        matches = re.findall(rule_pattern, css_content)
-                                        
-                                        for selector, declarations in matches:
-                                            selector = selector.strip()
-                                            if not selector:
-                                                continue
-                                                
-                                            # Parse declarations
-                                            props = {}
-                                            for decl in declarations.split(';'):
-                                                if ':' not in decl:
-                                                    continue
-                                                    
-                                                prop, val = decl.split(':', 1)
-                                                prop = prop.strip()
-                                                val = val.strip()
-                                                
-                                                if prop and val:
-                                                    props[prop] = val
-                                            
-                                            if props:
-                                                css_rules[selector] = props
+                                        # Parse the CSS content
+                                        parsed_rules = self.css_parser.parse(css_content)
                                         
                                         # Add these rules to the CSS parser
-                                        if css_rules:
+                                        if parsed_rules:
                                             # Add to stylesheets list
-                                            self.css_parser.stylesheets.append(css_rules)
+                                            self.css_parser.stylesheets.append(parsed_rules)
                                             
                                             # Update the combined style_rules
-                                            for selector, props in css_rules.items():
+                                            for selector, props in parsed_rules.items():
                                                 if selector in self.css_parser.style_rules:
                                                     self.css_parser.style_rules[selector].update(props)
                                                 else:
