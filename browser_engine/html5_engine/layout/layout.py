@@ -873,7 +873,9 @@ class LayoutEngine:
                 # In a real browser, we would create anonymous boxes for text
                 # For simplicity, we'll just include the text in the parent's content
                 if hasattr(layout_box.element, 'text_content'):
-                    layout_box.element.text_content += child.node_value
+                    # Don't append text if it's already in the element's text_content
+                    if not layout_box.element.text_content:
+                        layout_box.element.text_content = child.node_value
         
         return layout_box
     

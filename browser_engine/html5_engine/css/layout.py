@@ -723,11 +723,10 @@ class LayoutEngine:
                     # For simplicity, we'll just include the text in the parent's content
                     if hasattr(element, 'text_content'):
                         if hasattr(child, 'node_value'):
+                            # Don't append text if it's already in the element's text_content
                             if not element.text_content:
                                 element.text_content = child.node_value
-                            else:
-                                element.text_content += child.node_value
-                        
+    
         return layout_box
     
     def _create_layout_box(self, element: Element) -> LayoutBox:
