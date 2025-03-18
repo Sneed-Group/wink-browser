@@ -1174,6 +1174,49 @@ class JSEngine:
         # Remove HTML comments that might be in the script
         content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
         
+        # State machine for string handling
+        result = []
+        state = 'normal'  # States: normal, single_quote, double_quote, backtick
+        escaped = False
+        last_char = None
+        
+        for char in content:
+            if state == 'normal':
+                if char == "'" and not escaped:
+                    state = 'single_quote'
+                elif char == '"' and not escaped:
+                    state = 'double_quote'
+                elif char == '`' and not escaped:
+                    state = 'backtick'
+                escaped = char == '\\'
+                result.append(char)
+            elif state == 'single_quote':
+                if char == "'" and not escaped:
+                    state = 'normal'
+                escaped = char == '\\' and not escaped
+                result.append(char)
+            elif state == 'double_quote':
+                if char == '"' and not escaped:
+                    state = 'normal'
+                escaped = char == '\\' and not escaped
+                result.append(char)
+            elif state == 'backtick':
+                if char == '`' and not escaped:
+                    state = 'normal'
+                escaped = char == '\\' and not escaped
+                result.append(char)
+            last_char = char
+            
+        # Close any unclosed strings
+        if state == 'single_quote':
+            result.append("'")
+        elif state == 'double_quote':
+            result.append('"')
+        elif state == 'backtick':
+            result.append('`')
+            
+        content = ''.join(result)
+        
         # Special fix for DuckDuckGo scripts that have unterminated if statements
         if "duckduckgo.com" in content or "duck.com" in content:
             # If we find an if statement without closing braces, add them
