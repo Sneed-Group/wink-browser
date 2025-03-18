@@ -12,7 +12,7 @@ from typing import Dict, Optional, Tuple, Union, List, Callable
 import tkinter as tk
 from tkinter import ttk
 
-from ..dom import Document, SelectorEngine, MarkdownDOMCreator
+from ..dom import Document, SelectorEngine
 from ..css import CSSParser, LayoutEngine
 from ..rendering import HTML5Renderer
 from ..js import JSEngine
@@ -50,7 +50,6 @@ class HTML5Engine:
         self.selector_engine = SelectorEngine()
         self.layout_engine = LayoutEngine()
         self.js_engine = JSEngine()
-        self.markdown_dom_creator = MarkdownDOMCreator()
         
         # The renderer will be initialized later when a parent frame is available
         self.renderer = None
@@ -62,9 +61,6 @@ class HTML5Engine:
         self.on_load_handlers = []
         self.on_error_handlers = []
         
-        # Track rendering state
-        self.is_rendering = False
-        
         self.logger.info("HTML5Engine initialized with viewport %dx%d", width, height)
     
     def initialize_renderer(self, parent_frame: ttk.Frame) -> None:
@@ -75,8 +71,6 @@ class HTML5Engine:
             parent_frame: Parent Tkinter frame for rendering
         """
         self.renderer = HTML5Renderer(parent_frame)
-        # Set the engine reference in the renderer
-        self.renderer.set_engine(self)
         self.logger.info("HTML5Renderer initialized")
     
     def load_html(self, html_content: str, base_url: str = None) -> Document:
@@ -95,8 +89,11 @@ class HTML5Engine:
         # Store the base_url in the engine
         self.base_url = base_url
         
-        # Create a new document using the markdown DOM creator
-        self.document = self.markdown_dom_creator.create_dom(html_content, base_url)
+        # Create a new document
+        self.document = Document()
+        
+        # Parse HTML into the document
+        self.document.parse_html(html_content)
         
         # Store base URL in document
         self.document.base_url = base_url
@@ -737,20 +734,11 @@ class HTML5Engine:
             self.logger.error("Cannot render: renderer is not initialized")
             return
             
-        # Prevent re-entry during rendering
-        if self.is_rendering:
-            self.logger.warning("Render already in progress, skipping")
-            return
-            
-        self.is_rendering = True
         self.logger.info("Rendering document")
         
+        # Clear the renderer
         try:
-            # Only clear the renderer once at the start
             self.renderer.clear()
-            
-            # Process all CSS first
-            self._process_css()
             
             # Render the document using the calculated layout
             self.logger.debug(f"Passing layout_tree to renderer: {self.layout_tree}")
@@ -762,8 +750,6 @@ class HTML5Engine:
         except Exception as e:
             self.logger.error(f"Error rendering document: {str(e)}")
             self._trigger_error(f"Rendering error: {str(e)}")
-        finally:
-            self.is_rendering = False
     
     def _trigger_load(self) -> None:
         """Trigger load event handlers."""

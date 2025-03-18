@@ -259,6 +259,7 @@ class HTML5Renderer:
         
         # Debug options
         self.draw_debug_boxes = False
+        self.is_debug_mode = False  # Initialize debug mode flag
         
         # Event bindings
         self._init_event_bindings()
@@ -267,8 +268,6 @@ class HTML5Renderer:
         self.on_link_click: Optional[Callable[[str], None]] = None
         
         logger.debug("HTML5 Renderer initialized")
-        
-        # No longer drawing a debug rectangle to avoid rendering issues
         
         # Track processed nodes to prevent duplicates
         self.processed_nodes = set()
