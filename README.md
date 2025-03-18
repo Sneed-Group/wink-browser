@@ -1,4 +1,4 @@
-# Wink Browser
+# 😉 Wink Browser
 
 A modern, privacy-focused web browser built in Python.
 
