@@ -18,7 +18,6 @@ import urllib.parse
 import urllib.error
 import base64
 import time
-from io import BytesIO
 
 from browser_engine.html5_engine.dom import element
 
@@ -845,37 +844,83 @@ class HTML5Renderer:
             max_x = self.viewport_width
             max_y = self.viewport_height
             
-            # Use layout tree to determine content size
-            if hasattr(self.layout_tree, 'box_metrics'):
-                # Ensure all values are properly converted to int
-                # Handle 'auto' values and other non-numeric values
-                def safe_int_convert(value, default=0):
-                    """Convert a value to int safely, handling 'auto' and non-numeric values."""
-                    if value == 'auto' or value is None:
-                        return default
-                    try:
-                        return int(value)
-                    except (ValueError, TypeError):
-                        logger.debug(f"Converting non-numeric value '{value}' to {default}")
-                        return default
+            def safe_int_convert(value, default=0):
+                if value is None:
+                    return default
+                if isinstance(value, (int, float)):
+                    return int(value)
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    logger.debug(f"Converting non-numeric value '{value}' to {default}")
+                    return default
+            
+            def calculate_element_bounds(layout_box):
+                if not hasattr(layout_box, 'box_metrics'):
+                    return
                 
-                # Get box metrics with safe conversion
-                x = safe_int_convert(self.layout_tree.box_metrics.x)
-                width = safe_int_convert(self.layout_tree.box_metrics.width, self.viewport_width)
-                margin_right = safe_int_convert(self.layout_tree.box_metrics.margin_right)
-                y = safe_int_convert(self.layout_tree.box_metrics.y)
-                height = safe_int_convert(self.layout_tree.box_metrics.height, self.viewport_height)
-                margin_bottom = safe_int_convert(self.layout_tree.box_metrics.margin_bottom)
+                # Get element's position and dimensions
+                x = safe_int_convert(layout_box.box_metrics.x)
+                y = safe_int_convert(layout_box.box_metrics.y)
                 
-                # Width calculation
-                total_width = x + width + margin_right
-                if total_width > max_x:
-                    max_x = total_width
-
-                # Height calculation                
-                total_height = y + height + margin_bottom
-                if total_height > max_y:
-                    max_y = total_height
+                # Get content dimensions
+                content_width = safe_int_convert(layout_box.box_metrics.content_width)
+                content_height = safe_int_convert(layout_box.box_metrics.content_height)
+                
+                # Get box model properties
+                padding_left = safe_int_convert(layout_box.box_metrics.padding_left)
+                padding_right = safe_int_convert(layout_box.box_metrics.padding_right)
+                padding_top = safe_int_convert(layout_box.box_metrics.padding_top)
+                padding_bottom = safe_int_convert(layout_box.box_metrics.padding_bottom)
+                
+                border_left = safe_int_convert(layout_box.box_metrics.border_left_width)
+                border_right = safe_int_convert(layout_box.box_metrics.border_right_width)
+                border_top = safe_int_convert(layout_box.box_metrics.border_top_width)
+                border_bottom = safe_int_convert(layout_box.box_metrics.border_bottom_width)
+                
+                margin_left = safe_int_convert(layout_box.box_metrics.margin_left)
+                margin_right = safe_int_convert(layout_box.box_metrics.margin_right)
+                margin_top = safe_int_convert(layout_box.box_metrics.margin_top)
+                margin_bottom = safe_int_convert(layout_box.box_metrics.margin_bottom)
+                
+                # Calculate element's own dimensions including box model
+                element_width = content_width + padding_left + padding_right + border_left + border_right + margin_left + margin_right
+                element_height = content_height + padding_top + padding_bottom + border_top + border_bottom + margin_top + margin_bottom
+                
+                # Calculate actual bounds including position
+                right_edge = x + element_width
+                bottom_edge = y + element_height
+                
+                # Update max dimensions based on actual content
+                nonlocal max_x, max_y
+                
+                # Only update if this element actually has content or children
+                if content_width > 0 or content_height > 0 or hasattr(layout_box, 'children'):
+                    if right_edge > max_x:
+                        max_x = right_edge
+                    if bottom_edge > max_y:
+                        max_y = bottom_edge
+                
+                # Process children
+                if hasattr(layout_box, 'children'):
+                    child_max_y = 0
+                    for child in layout_box.children:
+                        calculate_element_bounds(child)
+                        # If child extends beyond parent, update parent's height
+                        if hasattr(child, 'box_metrics'):
+                            child_y = safe_int_convert(child.box_metrics.y)
+                            child_height = safe_int_convert(child.box_metrics.content_height)
+                            child_margin_bottom = safe_int_convert(child.box_metrics.margin_bottom)
+                            child_bottom = child_y + child_height + child_margin_bottom
+                            if child_bottom > child_max_y:
+                                child_max_y = child_bottom
+                    
+                    # Update max_y based on children if they extend beyond
+                    if child_max_y > max_y:
+                        max_y = child_max_y
+            
+            # Start calculation from root layout tree
+            calculate_element_bounds(self.layout_tree)
             
             # Add padding to ensure scrollbar controls are visible
             max_x += 20
@@ -901,7 +946,7 @@ class HTML5Renderer:
             
         except Exception as e:
             logger.error(f"Error updating scroll region: {e}")
-            
+    
     def _setup_canvas_bindings(self) -> None:
         """Set up canvas event bindings for scrolling and interaction."""
         # Mouse wheel scrolling
@@ -1575,10 +1620,10 @@ class HTML5Renderer:
                         png_data = cairosvg.svg2png(bytestring=decoded)
                         image = Image.open(BytesIO(png_data))
                     else:
-                        # For regular images, use the decoded data
                         image = Image.open(BytesIO(decoded))
                     
-                    # Cache and return the image regardless of format
+                    
+                    # Decode the image data
                     self.image_cache[src] = image
                     return image
                 except Exception as e:
@@ -1634,19 +1679,8 @@ class HTML5Renderer:
                             logger.info(f"Using network manager to fetch: {full_url}")
                             response = self.network_manager.get(full_url)
                             if response and response.content:
-                                # Check if it's an SVG
-                                content_type = response.headers.get('Content-Type', '').lower()
-                                is_svg = 'svg+xml' in content_type
-                                
-                                if is_svg:
-                                    # Convert SVG to PNG using cairosvg
-                                    import cairosvg
-                                    png_data = cairosvg.svg2png(bytestring=response.content)
-                                    image = Image.open(BytesIO(png_data))
-                                else:
-                                    # For regular images, use the content directly
-                                    image = Image.open(BytesIO(response.content))
-                                
+                                from io import BytesIO
+                                image = Image.open(BytesIO(response.content))
                                 self.image_cache[src] = image
                                 return image
                         
@@ -1657,18 +1691,7 @@ class HTML5Renderer:
                         
                         with urllib.request.urlopen(full_url) as response:
                             image_data = response.read()
-                            content_type = response.headers.get('Content-Type', '').lower()
-                            is_svg = 'svg+xml' in content_type
-                        
-                            if is_svg:
-                                # Convert SVG to PNG using cairosvg
-                                import cairosvg
-                                png_data = cairosvg.svg2png(bytestring=image_data)
-                                image = Image.open(BytesIO(png_data))
-                            else:
-                                # For regular images, use the image data directly
-                                image = Image.open(BytesIO(image_data))
-                            
+                            image = Image.open(BytesIO(image_data))
                             self.image_cache[src] = image
                             return image
                     except urllib.error.HTTPError as e:
@@ -1699,34 +1722,13 @@ class HTML5Renderer:
                                     if self.network_manager:
                                         response = self.network_manager.get(alt_url)
                                         if response and response.content:
-                                            image_data = response.read()
-                                            content_type = response.headers.get('Content-Type', '').lower()
-                                            is_svg = 'svg+xml' in content_type
-                        
-                                            if is_svg:
-                                                # Convert SVG to PNG using cairosvg
-                                                import cairosvg
-                                                png_data = cairosvg.svg2png(bytestring=image_data)
-                                                image = Image.open(BytesIO(png_data))
-                                            else:
-                                                # For regular images, use the image data directly
-                                                image = Image.open(BytesIO(image_data))
+                                            image = Image.open(BytesIO(response.content))
                                             self.image_cache[src] = image
                                             return image
                                     
                                     with urllib.request.urlopen(alt_url) as response:
                                         image_data = response.read()
-                                        content_type = response.headers.get('Content-Type', '').lower()
-                                        is_svg = 'svg+xml' in content_type
-                        
-                                        if is_svg:
-                                            # Convert SVG to PNG using cairosvg
-                                            import cairosvg
-                                            png_data = cairosvg.svg2png(bytestring=image_data)
-                                            image = Image.open(BytesIO(png_data))
-                                        else:
-                                            # For regular images, use the image data directly
-                                            image = Image.open(BytesIO(image_data))
+                                        image = Image.open(BytesIO(image_data))
                                         self.image_cache[src] = image
                                         return image
                                 except Exception as alt_e:
@@ -1761,19 +1763,8 @@ class HTML5Renderer:
                             logger.info(f"Using network manager to fetch: {full_url}")
                             response = self.network_manager.get(full_url)
                             if response and response.content:
-                                # Check if it's an SVG
-                                content_type = response.headers.get('Content-Type', '').lower()
-                                is_svg = 'svg+xml' in content_type
-                                
-                                if is_svg:
-                                    # Convert SVG to PNG using cairosvg
-                                    import cairosvg
-                                    png_data = cairosvg.svg2png(bytestring=response.content)
-                                    image = Image.open(BytesIO(png_data))
-                                else:
-                                    # For regular images, use the content directly
-                                    image = Image.open(BytesIO(response.content))
-                                
+                                from io import BytesIO
+                                image = Image.open(BytesIO(response.content))
                                 self.image_cache[src] = image
                                 return image
                         
@@ -1781,6 +1772,8 @@ class HTML5Renderer:
                         logger.info(f"Falling back to direct request: {full_url}")
                         import urllib.request
                         from io import BytesIO
+
+                        
                         
                         with urllib.request.urlopen(full_url) as response:
                             image_data = response.read()
@@ -1793,9 +1786,7 @@ class HTML5Renderer:
                                 png_data = cairosvg.svg2png(bytestring=image_data)
                                 image = Image.open(BytesIO(png_data))
                             else:
-                                # For regular images, use the image data directly
                                 image = Image.open(BytesIO(image_data))
-                            
                             self.image_cache[src] = image
                             return image
                     except urllib.error.HTTPError as e:
@@ -1836,7 +1827,6 @@ class HTML5Renderer:
                                                 png_data = cairosvg.svg2png(bytestring=image_data)
                                                 image = Image.open(BytesIO(png_data))
                                             else:
-                                                # For regular images, use the image data directly
                                                 image = Image.open(BytesIO(image_data))
                                             self.image_cache[src] = image
                                             return image
@@ -1852,7 +1842,6 @@ class HTML5Renderer:
                                             png_data = cairosvg.svg2png(bytestring=image_data)
                                             image = Image.open(BytesIO(png_data))
                                         else:
-                                            # For regular images, use the image data directly
                                             image = Image.open(BytesIO(image_data))
                                         self.image_cache[src] = image
                                         return image
@@ -1876,19 +1865,18 @@ class HTML5Renderer:
                         logger.info(f"Using network manager to fetch: {full_url}")
                         response = self.network_manager.get(full_url)
                         if response and response.content:
-                            # Check if it's an SVG
+                            from io import BytesIO
+                            image_data = response.read()
                             content_type = response.headers.get('Content-Type', '').lower()
                             is_svg = 'svg+xml' in content_type
                             
                             if is_svg:
                                 # Convert SVG to PNG using cairosvg
                                 import cairosvg
-                                png_data = cairosvg.svg2png(bytestring=response.content)
+                                png_data = cairosvg.svg2png(bytestring=image_data)
                                 image = Image.open(BytesIO(png_data))
                             else:
-                                # For regular images, use the content directly
                                 image = Image.open(BytesIO(response.content))
-                            
                             self.image_cache[src] = image
                             return image
                     
@@ -1906,10 +1894,8 @@ class HTML5Renderer:
                             # Convert SVG to PNG using cairosvg
                             import cairosvg
                             png_data = cairosvg.svg2png(bytestring=image_data)
-                            image = Image.open(BytesIO(png_data))
                         else:
-                            # For regular images, use the image data directly
-                            image = Image.open(BytesIO(image_data))
+                            image = Image.open(BytesIO(response.content))
                         image = Image.open(BytesIO(image_data))
                         self.image_cache[src] = image
                         return image
@@ -1936,8 +1922,8 @@ class HTML5Renderer:
                     logger.info(f"Trying path: {path}")
                     if os.path.exists(path):
                         image_data = open(path, 'rb').read()
-                        # Check if it's an SVG file by extension
-                        is_svg = path.lower().endswith('.svg')
+                        content_type = response.headers.get('Content-Type', '').lower()
+                        is_svg = 'svg+xml' in content_type
                         
                         if is_svg:
                             # Convert SVG to PNG using cairosvg
@@ -1945,10 +1931,7 @@ class HTML5Renderer:
                             png_data = cairosvg.svg2png(bytestring=image_data)
                             image = Image.open(BytesIO(png_data))
                         else:
-                            # For regular images, use the image data directly
-                            image = Image.open(BytesIO(image_data))
-                        
-                        # Cache and return the image regardless of format
+                            image = Image.open(path)
                         self.image_cache[src] = image
                         return image
                 

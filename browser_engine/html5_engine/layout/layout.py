@@ -260,11 +260,19 @@ class LayoutBox:
         if not value or value == 'auto':
             return 'auto'
         
-        # Handle percentage values - for now just return as pixels (would need context to calculate properly)
+        # Handle percentage values - calculate based on parent container
         if value.endswith('%'):
             try:
-                # Default to a percentage of an assumed container width of 800px
-                return int(float(value[:-1]) * 8)  # 1% = 8px (of 800px)
+                percentage = float(value[:-1]) / 100.0
+                if self.parent:
+                    # Use parent's content width for horizontal percentages
+                    parent_width = self.parent.box_metrics.content_width
+                    if isinstance(parent_width, str):
+                        parent_width = 0 if parent_width == 'auto' else float(parent_width)
+                    return int(parent_width * percentage)
+                else:
+                    # If no parent, use viewport width
+                    return int(self.viewport_width * percentage)
             except ValueError:
                 return 0
         
@@ -275,18 +283,79 @@ class LayoutBox:
             except ValueError:
                 return 0
         
-        # Handle em values - assume 1em = 16px
+        # Handle em values - calculate based on parent's font size
         if value.endswith('em'):
             try:
-                return int(float(value[:-2]) * 16)
+                em_value = float(value[:-2])
+                if self.parent:
+                    # Get parent's font size
+                    parent_font_size = self._parse_dimension_value(self.parent.computed_style.get('font-size', '16px'))
+                    if isinstance(parent_font_size, str):
+                        parent_font_size = 16 if parent_font_size == 'auto' else float(parent_font_size)
+                    return int(em_value * parent_font_size)
+                else:
+                    # Default to 16px if no parent
+                    return int(em_value * 16)
             except ValueError:
                 return 0
         
-        # Handle rem values - assume 1rem = 16px
+        # Handle rem values - calculate based on root font size
         if value.endswith('rem'):
             try:
-                return int(float(value[:-3]) * 16)
+                rem_value = float(value[:-3])
+                # Always use root font size (16px) for rem
+                return int(rem_value * 16)
             except ValueError:
+                return 0
+        
+        # Handle viewport units
+        if value.endswith('vw'):
+            try:
+                vw_value = float(value[:-2]) / 100.0
+                return int(self.viewport_width * vw_value)
+            except ValueError:
+                return 0
+        if value.endswith('vh'):
+            try:
+                vh_value = float(value[:-2]) / 100.0
+                return int(self.viewport_height * vh_value)
+            except ValueError:
+                return 0
+        
+        # Handle calc() expressions
+        if value.startswith('calc(') and value.endswith(')'):
+            try:
+                # Extract the expression inside calc()
+                expr = value[5:-1].strip()
+                # For now, handle simple arithmetic with px and %
+                # This is a simplified version - in a real browser, we'd need a full CSS calc() parser
+                if '+' in expr:
+                    parts = expr.split('+')
+                    total = 0
+                    for part in parts:
+                        total += self._parse_dimension_value(part.strip())
+                    return total
+                elif '-' in expr:
+                    parts = expr.split('-')
+                    total = self._parse_dimension_value(parts[0].strip())
+                    for part in parts[1:]:
+                        total -= self._parse_dimension_value(part.strip())
+                    return total
+                elif '*' in expr:
+                    parts = expr.split('*')
+                    total = 1
+                    for part in parts:
+                        total *= self._parse_dimension_value(part.strip())
+                    return total
+                elif '/' in expr:
+                    parts = expr.split('/')
+                    total = self._parse_dimension_value(parts[0].strip())
+                    for part in parts[1:]:
+                        divisor = self._parse_dimension_value(part.strip())
+                        if divisor != 0:
+                            total /= divisor
+                    return int(total)
+            except Exception:
                 return 0
         
         # Handle unitless values as pixels
@@ -501,12 +570,18 @@ class LayoutBox:
                         # If line-height has units, parse it as a dimension
                         line_height = self._parse_dimension_value(line_height_value)
                         if isinstance(line_height, str):
-                            line_height = int(font_size * 1.2) if line_height == 'auto' else float(line_height)
+                            try:
+                                float(line_height)
+                            except:
+                                line_height = int(font_size * 1.2)
                     
                     # Calculate how many lines the text might need
                     content_width = self.box_metrics.content_width
                     if isinstance(content_width, str):
-                        content_width = 0 if content_width == 'auto' else float(content_width)
+                        try:
+                            content_width = float(content_width)
+                        except:
+                            content_width = 0
                     
                     if content_width > 0:
                         # Rough estimate: each character is about 0.6 times the font size width
@@ -528,13 +603,13 @@ class LayoutBox:
                     
                     # Form elements should have a minimum height even if empty
                     if tag_name in ['input', 'button', 'select', 'textarea']:
-                        self.box_metrics.content_height = 24  # Minimum height for form elements
+                        self.box_metrics.content_height = 12  # Minimum height for form elements
                     elif tag_name in ['div', 'span', 'p', 'a']:
                         # Ensure non-zero height for container elements
-                        self.box_metrics.content_height = 16  # Minimum height for containers
+                        self.box_metrics.content_height = 8  # Minimum height for containers
                     else:
                         # Default minimum height for any element
-                        self.box_metrics.content_height = 8
+                        self.box_metrics.content_height = 4
         
         # Update box dimensions after calculating content height
         self._update_box_dimensions()
@@ -934,44 +1009,113 @@ class LayoutEngine:
         Parse a CSS dimension value.
         
         Args:
-            value: CSS dimension value
+            value: CSS dimension value (e.g., "10px", "50%", "auto")
             
         Returns:
-            Parsed value (int or 'auto')
+            Integer pixel value or 'auto'
         """
         if not value or value == 'auto':
             return 'auto'
-            
-        # Parse pixel values
+        
+        # Handle percentage values - calculate based on parent container
+        if value.endswith('%'):
+            try:
+                percentage = float(value[:-1]) / 100.0
+                if self.parent:
+                    # Use parent's content width for horizontal percentages
+                    parent_width = self.parent.box_metrics.content_width
+                    if isinstance(parent_width, str):
+                        parent_width = 0 if parent_width == 'auto' else float(parent_width)
+                    return int(parent_width * percentage)
+                else:
+                    # If no parent, use viewport width
+                    return int(self.viewport_width * percentage)
+            except ValueError:
+                return 0
+        
+        # Handle pixel values
         if value.endswith('px'):
             try:
                 return int(float(value[:-2]))
             except ValueError:
                 return 0
-                
-        # Parse percentage values (convert to viewport-relative)
-        elif value.endswith('%'):
+        
+        # Handle em values - calculate based on parent's font size
+        if value.endswith('em'):
             try:
-                percentage = float(value[:-1]) / 100.0
-                return int(self.viewport_width * percentage)
+                em_value = float(value[:-2])
+                if self.parent:
+                    # Get parent's font size
+                    parent_font_size = self._parse_dimension(self.parent.computed_style.get('font-size', '16px'))
+                    if isinstance(parent_font_size, str):
+                        parent_font_size = 16 if parent_font_size == 'auto' else float(parent_font_size)
+                    return int(em_value * parent_font_size)
+                else:
+                    # Default to 16px if no parent
+                    return int(em_value * 16)
             except ValueError:
                 return 0
-                
-        # Parse em values (assuming 1em = 16px for simplicity)
-        elif value.endswith('em'):
+        
+        # Handle rem values - calculate based on root font size
+        if value.endswith('rem'):
             try:
-                return int(float(value[:-2]) * 16)
+                rem_value = float(value[:-3])
+                # Always use root font size (16px) for rem
+                return int(rem_value * 16)
             except ValueError:
                 return 0
-                
-        # Parse rem values (assuming 1rem = 16px for simplicity)
-        elif value.endswith('rem'):
+        
+        # Handle viewport units
+        if value.endswith('vw'):
             try:
-                return int(float(value[:-3]) * 16)
+                vw_value = float(value[:-2]) / 100.0
+                return int(self.viewport_width * vw_value)
             except ValueError:
                 return 0
-                
-        # If it's just a number, assume pixels
+        if value.endswith('vh'):
+            try:
+                vh_value = float(value[:-2]) / 100.0
+                return int(self.viewport_height * vh_value)
+            except ValueError:
+                return 0
+        
+        # Handle calc() expressions
+        if value.startswith('calc(') and value.endswith(')'):
+            try:
+                # Extract the expression inside calc()
+                expr = value[5:-1].strip()
+                # For now, handle simple arithmetic with px and %
+                # This is a simplified version - in a real browser, we'd need a full CSS calc() parser
+                if '+' in expr:
+                    parts = expr.split('+')
+                    total = 0
+                    for part in parts:
+                        total += self._parse_dimension(part.strip())
+                    return total
+                elif '-' in expr:
+                    parts = expr.split('-')
+                    total = self._parse_dimension(parts[0].strip())
+                    for part in parts[1:]:
+                        total -= self._parse_dimension(part.strip())
+                    return total
+                elif '*' in expr:
+                    parts = expr.split('*')
+                    total = 1
+                    for part in parts:
+                        total *= self._parse_dimension(part.strip())
+                    return total
+                elif '/' in expr:
+                    parts = expr.split('/')
+                    total = self._parse_dimension(parts[0].strip())
+                    for part in parts[1:]:
+                        divisor = self._parse_dimension(part.strip())
+                        if divisor != 0:
+                            total /= divisor
+                    return int(total)
+            except Exception:
+                return 0
+        
+        # Handle unitless values as pixels
         try:
             return int(float(value))
         except ValueError:
