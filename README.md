@@ -160,3 +160,4 @@ This project is licensed under the Sammy Public License - see the LICENSE file f
 - [js2py](https://github.com/vlasovskikh/js2py) for JavaScript execution
 - [Requests](https://requests.readthedocs.io/) for HTTP handling
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the UI 
+- [Python](https://python.org) for the programming language 
