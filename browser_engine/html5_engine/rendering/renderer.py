@@ -1635,6 +1635,50 @@ class HTML5Renderer:
                             image = Image.open(BytesIO(image_data))
                             self.image_cache[src] = image
                             return image
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            logger.info(f"404 error for {full_url}, trying alternative URL formats")
+                            # Try alternative URL formats
+                            alternative_urls = []
+                            
+                            # If URL has www, try without it
+                            if 'www.' in full_url:
+                                alternative_urls.append(full_url.replace('www.', ''))
+                            
+                            # If URL doesn't have www, try with it
+                            if not 'www.' in full_url:
+                                scheme, rest = full_url.split('://')
+                                alternative_urls.append(f"{scheme}://www.{rest}")
+                            
+                            # Try removing subdomain if present
+                            if '.' in parsed_url.netloc and not parsed_url.netloc.startswith('www.'):
+                                netloc_parts = parsed_url.netloc.split('.')
+                                if len(netloc_parts) > 2:
+                                    alternative_urls.append(f"{parsed_url.scheme}://{'.'.join(netloc_parts[1:])}{parsed_url.path}")
+                            
+                            # Try each alternative URL
+                            for alt_url in alternative_urls:
+                                try:
+                                    logger.info(f"Trying alternative URL: {alt_url}")
+                                    if self.network_manager:
+                                        response = self.network_manager.get(alt_url)
+                                        if response and response.content:
+                                            image = Image.open(BytesIO(response.content))
+                                            self.image_cache[src] = image
+                                            return image
+                                    
+                                    with urllib.request.urlopen(alt_url) as response:
+                                        image_data = response.read()
+                                        image = Image.open(BytesIO(image_data))
+                                        self.image_cache[src] = image
+                                        return image
+                                except Exception as alt_e:
+                                    logger.debug(f"Failed to load from alternative URL {alt_url}: {alt_e}")
+                                    continue
+                            
+                            logger.error(f"All alternative URLs failed for {full_url}")
+                        else:
+                            logger.error(f"HTTP error {e.code} for URL {full_url}: {e}")
                     except Exception as e:
                         logger.error(f"Failed to load image from URL {full_url}: {e}")
                         # Continue with other methods if this fails
@@ -1652,6 +1696,75 @@ class HTML5Renderer:
                     base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
                     full_url = urllib.parse.urljoin(base_url, src)
                     logger.debug(f"Resolved relative path against directory: {full_url}")
+                    
+                    # Try to load the image from the full URL
+                    try:
+                        # Use network manager if available
+                        if self.network_manager:
+                            logger.info(f"Using network manager to fetch: {full_url}")
+                            response = self.network_manager.get(full_url)
+                            if response and response.content:
+                                from io import BytesIO
+                                image = Image.open(BytesIO(response.content))
+                                self.image_cache[src] = image
+                                return image
+                        
+                        # Fallback to direct request
+                        logger.info(f"Falling back to direct request: {full_url}")
+                        import urllib.request
+                        from io import BytesIO
+                        
+                        with urllib.request.urlopen(full_url) as response:
+                            image_data = response.read()
+                            image = Image.open(BytesIO(image_data))
+                            self.image_cache[src] = image
+                            return image
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            logger.info(f"404 error for {full_url}, trying alternative URL formats")
+                            # Try alternative URL formats
+                            alternative_urls = []
+                            
+                            # If URL has www, try without it
+                            if 'www.' in full_url:
+                                alternative_urls.append(full_url.replace('www.', ''))
+                            
+                            # If URL doesn't have www, try with it
+                            if not 'www.' in full_url:
+                                scheme, rest = full_url.split('://')
+                                alternative_urls.append(f"{scheme}://www.{rest}")
+                            
+                            # Try removing subdomain if present
+                            if '.' in parsed_url.netloc and not parsed_url.netloc.startswith('www.'):
+                                netloc_parts = parsed_url.netloc.split('.')
+                                if len(netloc_parts) > 2:
+                                    alternative_urls.append(f"{parsed_url.scheme}://{'.'.join(netloc_parts[1:])}{parsed_url.path}")
+                            
+                            # Try each alternative URL
+                            for alt_url in alternative_urls:
+                                try:
+                                    logger.info(f"Trying alternative URL: {alt_url}")
+                                    if self.network_manager:
+                                        response = self.network_manager.get(alt_url)
+                                        if response and response.content:
+                                            image = Image.open(BytesIO(response.content))
+                                            self.image_cache[src] = image
+                                            return image
+                                    
+                                    with urllib.request.urlopen(alt_url) as response:
+                                        image_data = response.read()
+                                        image = Image.open(BytesIO(image_data))
+                                        self.image_cache[src] = image
+                                        return image
+                                except Exception as alt_e:
+                                    logger.debug(f"Failed to load from alternative URL {alt_url}: {alt_e}")
+                                    continue
+                            
+                            logger.error(f"All alternative URLs failed for {full_url}")
+                        else:
+                            logger.error(f"HTTP error {e.code} for URL {full_url}: {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to load image from URL {full_url}: {e}")
             
             logger.debug(f"Determined base URL: {base_url}")
             
@@ -2341,6 +2454,10 @@ class HTML5Renderer:
             try:
                 # Convert PIL Image to PhotoImage if needed
                 if src not in self.photo_cache:
+                    # Ensure dimensions are integers
+                    width = int(width)
+                    height = int(height)
+                    
                     # Resize image if needed
                     if width != img.width or height != img.height:
                         img = img.resize((width, height), Image.Resampling.LANCZOS)
@@ -2353,7 +2470,7 @@ class HTML5Renderer:
                 
                 # Create the image on the canvas
                 image_item = self.canvas.create_image(
-                    x, y,
+                    int(x), int(y),  # Ensure coordinates are integers
                     image=photo,
                     anchor='nw',
                     tags=f'element:{element.id}' if hasattr(element, 'id') and element.id else ''
@@ -2363,7 +2480,7 @@ class HTML5Renderer:
                 # Add debug rectangle if enabled
                 if self.draw_debug_boxes:
                     debug_rect = self.canvas.create_rectangle(
-                        x, y, x + width, y + height,
+                        int(x), int(y), int(x + width), int(y + height),  # Ensure all coordinates are integers
                         outline='red',
                         fill='',
                         width=1,
@@ -2378,7 +2495,7 @@ class HTML5Renderer:
                 logger.error(f"Error rendering image: {e}")
         
         # If we get here, show a placeholder
-        self._render_image_placeholder(layout_box, x, y, width, height, element)
+        self._render_image_placeholder(layout_box, int(x), int(y), int(width), int(height), element)
     
     def _render_button_element(self, x, y, width, height, text, element, is_disabled=False):
         """
