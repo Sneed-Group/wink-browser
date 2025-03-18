@@ -503,18 +503,48 @@ class LayoutEngine:
         total_height = 0
         prev_element_tag = None
         
+        # Base spacing for different element types (as percentages of viewport height)
+        base_spacing = {
+            'h1': 0.08,    # 8% spacing for main headings
+            'h2': 0.07,    # 7% spacing for major subheadings
+            'h3': 0.06,    # 6% spacing for subheadings
+            'h4': 0.05,    # 5% spacing for minor subheadings
+            'h5': 0.04,    # 4% spacing for small headings
+            'h6': 0.03,    # 3% spacing for smallest headings
+            'p': 0.04,     # 4% spacing for paragraphs
+            'div': 0.04,   # 4% spacing for divs
+            'pre': 0.04,   # 4% spacing for code blocks
+            'a': 0.02,     # 2% spacing for links
+            'span': 0.01,  # 1% spacing for inline elements
+            'img': 0.04,   # 4% spacing for images
+            'ul': 0.04,    # 4% spacing for lists
+            'ol': 0.04,    # 4% spacing for ordered lists
+            'li': 0.02,    # 2% spacing for list items
+            'table': 0.04, # 4% spacing for tables
+            'form': 0.04,  # 4% spacing for forms
+            'input': 0.02, # 2% spacing for inputs
+            'button': 0.02 # 2% spacing for buttons
+        }
+
         for child in layout_box.children:
-            # Layout the child
+            # Get current element's tag
+            current_tag = child.element.tag_name.lower() if hasattr(child.element, 'tag_name') else None
+            
+            # Calculate spacing based on current and previous elements
+            spacing = 0
+            if current_tag and prev_element_tag:
+                # Get base spacing for both elements
+                current_base = base_spacing.get(current_tag, 0.02)  # Default to 2%
+                prev_base = base_spacing.get(prev_element_tag, 0.02)  # Default to 2%
+                # Use half of each element's base spacing to create the gap
+                spacing = ((current_base + prev_base) / 2) * container_width
+            
+            # Update y position with spacing if not the first element
+            if prev_element_tag:
+                y += spacing
+            
+            # Layout the child at the current position
             self._layout_box(child, x, y, available_width)
-            
-            # Calculate spacing based on element types
-            spacing = self._calculate_element_spacing(child, prev_element_tag)
-            
-            # Update y position with spacing
-            y += spacing
-            
-            # Update child's y position
-            child.box_metrics.y = y
             
             # Get child's margin box height safely
             child_margin_box_height = child.box_metrics.margin_box_height
@@ -536,72 +566,6 @@ class LayoutEngine:
         
         # Update parent box height
         layout_box.box_metrics.content_height = max(total_height, float(layout_box.box_metrics.content_height) if isinstance(layout_box.box_metrics.content_height, (int, float)) else 0)
-
-    def _calculate_element_spacing(self, element: LayoutBox, prev_tag: Optional[str]) -> int:
-        """Calculate spacing between elements based on their types."""
-        if not hasattr(element.element, 'tag_name'):
-            return 16  # Default spacing
-            
-        current_tag = element.element.tag_name.lower()
-        
-        # Base spacing for different element types
-        base_spacing = {
-            'h1': 40,   # Large spacing for main headings
-            'h2': 32,   # Medium spacing for subheadings
-            'h3': 28,   # Medium spacing for subheadings
-            'h4': 24,   # Smaller spacing for subheadings
-            'h5': 20,   # Smaller spacing for subheadings
-            'h6': 16,   # Smaller spacing for subheadings
-            'p': 20,    # Standard paragraph spacing
-            'div': 16,  # Standard div spacing
-            'pre': 24,  # Code block spacing
-            'a': 8,     # Small spacing for links
-            'span': 4,  # Minimal spacing for inline elements
-            'img': 24,  # Image spacing
-            'ul': 24,   # List spacing
-            'ol': 24,   # List spacing
-            'li': 12,   # List item spacing
-            'table': 32,# Table spacing
-            'form': 32, # Form spacing
-            'input': 16,# Form element spacing
-            'button': 16,# Button spacing
-        }
-        
-        # Get base spacing for current element
-        spacing = base_spacing.get(current_tag, 12)  # Default spacing increased to 12
-        
-        # Adjust spacing based on previous element
-        if prev_tag:
-            # Add extra spacing between text blocks
-            if prev_tag in ['p', 'pre', 'div'] and current_tag in ['p', 'pre', 'div']:
-                spacing += 12
-            
-            # Add extra spacing before headings
-            if current_tag.startswith('h') and len(current_tag) == 2:
-                spacing += 20
-            
-            # Add extra spacing after headings
-            if prev_tag.startswith('h') and len(prev_tag) == 2:
-                spacing += 12
-            
-            # Reduce spacing between inline elements
-            if prev_tag in ['a', 'span'] and current_tag in ['a', 'span']:
-                spacing = 4
-            
-            # Add extra spacing around lists
-            if current_tag in ['ul', 'ol'] or prev_tag in ['ul', 'ol']:
-                spacing += 16
-            
-            # Add extra spacing around images
-            if current_tag == 'img' or prev_tag == 'img':
-                spacing += 16
-            
-            # Add extra spacing around forms and form elements
-            if current_tag in ['form', 'input', 'button', 'textarea', 'select'] or \
-               prev_tag in ['form', 'input', 'button', 'textarea', 'select']:
-                spacing += 12
-        
-        return spacing
 
     def _layout_inline_children(self, layout_box: LayoutBox, container_width: int) -> None:
         """
