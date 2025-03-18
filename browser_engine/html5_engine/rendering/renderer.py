@@ -19,6 +19,8 @@ import urllib.error
 import base64
 import time
 
+from browser_engine.html5_engine.dom import element
+
 from ..dom import Document, Element, Node, NodeType
 from ..css import LayoutEngine, LayoutBox, CSSParser, DisplayType, BoxType
 
@@ -248,8 +250,12 @@ class HTML5Renderer:
         # Colors
         self._init_colors()
         
-        # Image cache
-        self.image_cache: Dict[str, PhotoImage] = {}
+        # Image caches
+        self.image_cache: Dict[str, Image.Image] = {}  # PIL Image cache
+        self.photo_cache: Dict[str, PhotoImage] = {}  # Tkinter PhotoImage cache
+        
+        # Network manager (will be set by set_engine)
+        self.network_manager = None
         
         # Initialize for drag scrolling
         self._drag_start_x = 0
@@ -267,8 +273,6 @@ class HTML5Renderer:
         self.on_link_click: Optional[Callable[[str], None]] = None
         
         logger.debug("HTML5 Renderer initialized")
-        
-        # No longer drawing a debug rectangle to avoid rendering issues
         
         # Track processed nodes to prevent duplicates
         self.processed_nodes = set()
@@ -324,6 +328,10 @@ class HTML5Renderer:
             engine: The HTML5Engine instance
         """
         self.html5_engine = engine
+        # Get network manager from engine
+        self.network_manager = getattr(engine, 'network_manager', None)
+        if not self.network_manager:
+            logger.warning("No network manager available - image loading may be limited")
         logger.debug("HTML5Engine reference set in renderer")
     
     def clear(self) -> None:
@@ -334,6 +342,9 @@ class HTML5Renderer:
         self._clear_canvas()
         self.document = None
         self.layout_tree = None
+        # Clear image caches
+        self.image_cache.clear()
+        self.photo_cache.clear()
         logger.debug("Renderer cleared")
     
     def _on_canvas_click(self, event) -> None:
@@ -1503,7 +1514,7 @@ class HTML5Renderer:
                     self.canvas.after(100, self._redraw_images, src)
         except Exception as e:
             logger.error(f"Error loading image in background: {e}")
-            
+    
     def _redraw_images(self, src):
         """
         Redraw images after they've been loaded.
@@ -1535,212 +1546,174 @@ class HTML5Renderer:
         if not src:
             return None
             
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Attempting to load image from source: {src}")
+        logger.info(f"Attempting to load image from source: {src}")
         
-        # Handle data URLs
-        if src.startswith('data:image'):
-            try:
-                # Extract the base64 data
-                header, encoded = src.split(',', 1)
-                import base64
-                from io import BytesIO
-                
-                # Decode the image data
-                decoded = base64.b64decode(encoded)
-                from PIL import Image
-                return Image.open(BytesIO(decoded))
-            except Exception as e:
-                logger.error(f"Failed to decode data URL: {e}")
-                return None
-                
-        # Handle absolute URLs
-        if src.startswith('http://') or src.startswith('https://'):
-            try:
-                # Try to use the network manager if available
-                if hasattr(self, 'network_manager') and self.network_manager:
-                    response = self.network_manager.get(src)
-                    if response and response.content:
-                        from io import BytesIO
-                        from PIL import Image
-                        return Image.open(BytesIO(response.content))
-                
-                # Fallback to direct request
-                import urllib.request
-                from io import BytesIO
-                from PIL import Image
-                
-                with urllib.request.urlopen(src) as response:
-                    image_data = response.read()
-                    return Image.open(BytesIO(image_data))
-            except Exception as e:
-                logger.error(f"Failed to load image from URL {src}: {e}")
-                return None
-                
-        # Handle file URLs
-        if src.startswith('file://'):
-            file_path = src[7:]  # Remove 'file://' prefix
-            if os.path.exists(file_path):
-                try:
-                    from PIL import Image
-                    return Image.open(file_path)
-                except Exception as e:
-                    logger.error(f"Failed to load image from file {file_path}: {e}")
-                    return None
-            else:
-                logger.error(f"File does not exist: {file_path}")
-                return None
-                
-        # Handle relative URLs
-        if self.current_url:
-            from urllib.parse import urljoin, urlparse
-            
-            # If src starts with /, it's relative to the domain root
-            if src.startswith('/'):
-                # Get the domain part of the current URL
-                parsed_url = urlparse(self.current_url)
-                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                absolute_url = urljoin(base_url, src)
-                
-                # For file:// URLs, we need special handling
-                if self.current_url.startswith('file://'):
-                    # For file URLs, resolve against the document root
-                    doc_root = os.path.dirname(urlparse(self.current_url).path)
-                    
-                    # Try different possible locations
-                    possible_paths = [
-                        # Path relative to document root
-                        os.path.normpath(os.path.join(doc_root, src.lstrip('/'))),
-                        
-                        # Path relative to current working directory
-                        os.path.normpath(os.path.join(os.getcwd(), src.lstrip('/'))),
-                        
-                        # Path as is (might be absolute on the filesystem)
-                        src.lstrip('/'),
-                        
-                        # Try with /codename-wink/ in the path
-                        os.path.normpath(os.path.join(doc_root, 'codename-wink', src.lstrip('/'))),
-                        
-                        # Try with the parent directory
-                        os.path.normpath(os.path.join(os.path.dirname(doc_root), src.lstrip('/')))
-                    ]
-                    
-                    for path in possible_paths:
-                        logger.debug(f"Trying to load image from: {path}")
-                        if os.path.exists(path):
-                            try:
-                                from PIL import Image
-                                logger.info(f"Successfully loaded image from: {path}")
-                                return Image.open(path)
-                            except Exception as e:
-                                logger.error(f"Failed to load image from file {path}: {e}")
-                                continue
-                        else:
-                            logger.debug(f"File does not exist: {path}")
-                    
-                    # Try one more approach - look for the image in the current directory structure
-                    try:
-                        image_filename = os.path.basename(src)
-                        for root, dirs, files in os.walk(os.getcwd()):
-                            if image_filename in files:
-                                full_path = os.path.join(root, image_filename)
-                                logger.info(f"Found image by filename search: {full_path}")
-                                from PIL import Image
-                                return Image.open(full_path)
-                    except Exception as e:
-                        logger.error(f"Error during filename search: {e}")
-                    
-                    return None
-                else:
-                    # For http/https URLs
-                    try:
-                        import urllib.request
-                        from io import BytesIO
-                        from PIL import Image
-                        
-                        with urllib.request.urlopen(absolute_url) as response:
-                            image_data = response.read()
-                            return Image.open(BytesIO(image_data))
-                    except Exception as e:
-                        logger.error(f"Failed to load image from URL {absolute_url}: {e}")
-                        return None
-            else:
-                # Regular relative URL (no leading slash)
-                try:
-                    # For file:// URLs, resolve against the directory of the current file
-                    if self.current_url.startswith('file://'):
-                        base_dir = os.path.dirname(urlparse(self.current_url).path)
-                        
-                        # Try different possible locations
-                        possible_paths = [
-                            # Standard relative path
-                            os.path.normpath(os.path.join(base_dir, src)),
-                            
-                            # Relative to current working directory
-                            os.path.normpath(os.path.join(os.getcwd(), src)),
-                            
-                            # Try with /codename-wink/ in the path
-                            os.path.normpath(os.path.join(base_dir, 'codename-wink', src)),
-                            
-                            # Try with the parent directory
-                            os.path.normpath(os.path.join(os.path.dirname(base_dir), src))
-                        ]
-                        
-                        for path in possible_paths:
-                            logger.debug(f"Trying to load image from: {path}")
-                            if os.path.exists(path):
-                                try:
-                                    from PIL import Image
-                                    logger.info(f"Successfully loaded image from: {path}")
-                                    return Image.open(path)
-                                except Exception as e:
-                                    logger.error(f"Failed to load image from file {path}: {e}")
-                                    continue
-                            else:
-                                logger.debug(f"File does not exist: {path}")
-                        
-                        # Try one more approach - look for the image in the current directory structure
-                        try:
-                            image_filename = os.path.basename(src)
-                            for root, dirs, files in os.walk(os.getcwd()):
-                                if image_filename in files:
-                                    full_path = os.path.join(root, image_filename)
-                                    logger.info(f"Found image by filename search: {full_path}")
-                                    from PIL import Image
-                                    return Image.open(full_path)
-                        except Exception as e:
-                            logger.error(f"Error during filename search: {e}")
-                        
-                        return None
-                    else:
-                        # For http/https URLs
-                        absolute_url = urljoin(self.current_url, src)
-                        import urllib.request
-                        from io import BytesIO
-                        from PIL import Image
-                        
-                        with urllib.request.urlopen(absolute_url) as response:
-                            image_data = response.read()
-                            return Image.open(BytesIO(image_data))
-                except Exception as e:
-                    logger.error(f"Failed to load image from relative URL {src}: {e}")
-                    return None
+        # Check image cache first
+        if src in self.image_cache:
+            logger.info(f"Found image in cache: {src}")
+            return self.image_cache[src]
         
-        # If we get here, we couldn't resolve the image
-        # Try one last approach - look for the image by filename in the current directory structure
         try:
-            image_filename = os.path.basename(src)
-            for root, dirs, files in os.walk(os.getcwd()):
-                if image_filename in files:
-                    full_path = os.path.join(root, image_filename)
-                    logger.info(f"Found image by filename search: {full_path}")
-                    from PIL import Image
-                    return Image.open(full_path)
+            # Handle data URLs
+            if src.startswith('data:image'):
+                try:
+                    # Extract the base64 data
+                    header, encoded = src.split(',', 1)
+                    import base64
+                    from io import BytesIO
+                    
+                    # Decode the image data
+                    decoded = base64.b64decode(encoded)
+                    image = Image.open(BytesIO(decoded))
+                    self.image_cache[src] = image
+                    return image
+                except Exception as e:
+                    logger.error(f"Failed to decode data URL: {e}")
+                    return None
+                    
+            # Get base URL - try multiple sources to ensure we get the correct one
+            # Initialize base_url
+            base_url = ""
+            
+            # Try to get the current URL from the document or engine
+            current_url = ""
+            
+            # Check if renderer itself has current_url attribute
+            if hasattr(self, 'current_url') and self.current_url:
+                current_url = self.current_url
+                logger.debug(f"Found current URL from renderer: {current_url}")
+            
+            # If no URL from renderer, check document
+            if not current_url and hasattr(self, 'document') and self.document:
+                if hasattr(self.document, 'url') and self.document.url:
+                    current_url = self.document.url
+                    logger.debug(f"Found current URL from document: {current_url}")
+            
+            # If no URL from document, try to get from engine
+            if not current_url and hasattr(self, 'html5_engine'):
+                if hasattr(self.html5_engine, 'current_url') and self.html5_engine.current_url:
+                    current_url = self.html5_engine.current_url
+                    logger.debug(f"Found current URL from engine.current_url: {current_url}")
+                elif hasattr(self.html5_engine, 'base_url') and self.html5_engine.base_url:
+                    current_url = self.html5_engine.base_url
+                    logger.debug(f"Found current URL from engine.base_url: {current_url}")
+            
+            # Extract base URL from current URL using regex
+            if current_url:
+                # Use urllib.parse instead of regex for more robust URL handling
+                import urllib.parse
+                parsed_url = urllib.parse.urlparse(current_url)
+                
+                # Get the origin (scheme + netloc)
+                origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                
+                # For absolute paths, we'll use the origin
+                if src.startswith('/'):
+                    # Use urljoin to properly handle the path
+                    full_url = urllib.parse.urljoin(origin, src)
+                    logger.debug(f"Resolved absolute path against origin: {full_url}")
+                    
+                    # Try to load the image from the full URL
+                    try:
+                        # Use network manager if available
+                        if self.network_manager:
+                            logger.info(f"Using network manager to fetch: {full_url}")
+                            response = self.network_manager.get(full_url)
+                            if response and response.content:
+                                from io import BytesIO
+                                image = Image.open(BytesIO(response.content))
+                                self.image_cache[src] = image
+                                return image
+                        
+                        # Fallback to direct request
+                        logger.info(f"Falling back to direct request: {full_url}")
+                        import urllib.request
+                        from io import BytesIO
+                        
+                        with urllib.request.urlopen(full_url) as response:
+                            image_data = response.read()
+                            image = Image.open(BytesIO(image_data))
+                            self.image_cache[src] = image
+                            return image
+                    except Exception as e:
+                        logger.error(f"Failed to load image from URL {full_url}: {e}")
+                        # Continue with other methods if this fails
+                else:
+                    # For relative paths, we'll use the directory of the current URL as base
+                    path_parts = parsed_url.path.split('/')
+                    if '.' in path_parts[-1]:  # If the last part looks like a file
+                        path_parts.pop()  # Remove the file part
+                    
+                    # Reconstruct the base URL for relative paths
+                    path = '/'.join(path_parts)
+                    if not path.endswith('/'):
+                        path += '/'
+                        
+                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
+                    full_url = urllib.parse.urljoin(base_url, src)
+                    logger.debug(f"Resolved relative path against directory: {full_url}")
+            
+            logger.debug(f"Determined base URL: {base_url}")
+            
+            # If we haven't already tried to load from a URL above, try now with full_url
+            if full_url.startswith(('http://', 'https://')) and full_url != src:
+                try:
+                    # Try to use the network manager if available
+                    if self.network_manager:
+                        logger.info(f"Using network manager to fetch: {full_url}")
+                        response = self.network_manager.get(full_url)
+                        if response and response.content:
+                            from io import BytesIO
+                            image = Image.open(BytesIO(response.content))
+                            self.image_cache[src] = image
+                            return image
+                    
+                    # Fallback to direct request
+                    logger.info(f"Falling back to direct request: {full_url}")
+                    import urllib.request
+                    from io import BytesIO
+                    
+                    with urllib.request.urlopen(full_url) as response:
+                        image_data = response.read()
+                        image = Image.open(BytesIO(image_data))
+                        self.image_cache[src] = image
+                        return image
+                except Exception as e:
+                    logger.error(f"Failed to load image from URL {full_url}: {e}")
+            
+            # Last resort: try local files (this is unlikely to work for web pages but might for local files)
+            logger.warning("Remote image loading failed, attempting local file paths as last resort")
+            try:
+                # Try different possible paths
+                paths_to_try = [
+                    src.replace('file://', ''),  # Remove file:// prefix
+                    os.path.join(os.getcwd(), src.lstrip('/')),  # Relative to CWD
+                    os.path.normpath(src)  # Normalized path
+                ]
+                
+                # If we have a base URL that's a file path, try relative to that
+                if base_url and base_url.startswith('file://'):
+                    base_path = base_url.replace('file://', '')
+                    base_dir = os.path.dirname(base_path)
+                    paths_to_try.insert(0, os.path.join(base_dir, src))
+                
+                for path in paths_to_try:
+                    logger.info(f"Trying path: {path}")
+                    if os.path.exists(path):
+                        image = Image.open(path)
+                        self.image_cache[src] = image
+                        return image
+                
+                logger.error(f"No valid path found for image: {src}")
+                return None
+                
+            except Exception as e:
+                logger.error(f"Failed to load image from file: {e}")
+                return None
+                
         except Exception as e:
-            logger.error(f"Error during filename search: {e}")
-        
-        logger.error(f"Could not resolve image source: {src}")
-        return None
+            logger.error(f"Error loading image: {e}")
+            return None
     
     def _render_element(self, layout_box: LayoutBox, x_offset: int = 0, y_offset: int = 0) -> None:
         """
@@ -2346,35 +2319,66 @@ class HTML5Renderer:
         Render an image element.
         
         Args:
-            layout_box: The layout box for the image element
+            layout_box: The layout box for the image
             x: X coordinate
             y: Y coordinate
-            width: Width of the element
-            height: Height of the element
+            width: Width of the image
+            height: Height of the image
         """
-        if not layout_box.element:
+        element = layout_box.element
+        if not element:
             return
             
-        # Get the src attribute
-        src = layout_box.element.get_attribute('src') if hasattr(layout_box.element, 'get_attribute') else None
-        
+        # Get image source
+        src = element.get_attribute('src') if hasattr(element, 'get_attribute') else None
         if not src:
-            # Render a placeholder if no src
-            self._render_image_placeholder(layout_box, x, y, width, height, layout_box.element)
             return
             
-        # Check if image is already in cache
-        if src in self.image_cache:
-            # Use cached image
-            image = self.image_cache[src]
-            image_item = self.canvas.create_image(x, y, image=image, anchor='nw')
-            self.canvas_items.append(image_item)
-        else:
-            # Start loading the image
-            self._start_image_loading(src)
-            
-            # Render placeholder while loading
-            self._render_image_placeholder(layout_box, x, y, width, height, layout_box.element)
+        # Try to get the image
+        img = self._get_image(src)
+        
+        if img:
+            try:
+                # Convert PIL Image to PhotoImage if needed
+                if src not in self.photo_cache:
+                    # Resize image if needed
+                    if width != img.width or height != img.height:
+                        img = img.resize((width, height), Image.Resampling.LANCZOS)
+                    
+                    # Convert to PhotoImage
+                    photo = ImageTk.PhotoImage(img)
+                    self.photo_cache[src] = photo
+                else:
+                    photo = self.photo_cache[src]
+                
+                # Create the image on the canvas
+                image_item = self.canvas.create_image(
+                    x, y,
+                    image=photo,
+                    anchor='nw',
+                    tags=f'element:{element.id}' if hasattr(element, 'id') and element.id else ''
+                )
+                self.canvas_items.append(image_item)
+                
+                # Add debug rectangle if enabled
+                if self.draw_debug_boxes:
+                    debug_rect = self.canvas.create_rectangle(
+                        x, y, x + width, y + height,
+                        outline='red',
+                        fill='',
+                        width=1,
+                        tags=f'debug element:{element.id}' if hasattr(element, 'id') and element.id else 'debug'
+                    )
+                    self.canvas_items.append(debug_rect)
+                
+                logger.debug(f"Rendered image: {src}")
+                return
+                
+            except Exception as e:
+                logger.error(f"Error rendering image: {e}")
+        
+        # If we get here, show a placeholder
+        self._render_image_placeholder(layout_box, x, y, width, height, element)
     
     def _render_button_element(self, x, y, width, height, text, element, is_disabled=False):
         """
@@ -2840,50 +2844,46 @@ class HTML5Renderer:
             logger.error(f"Error in text rendering: {e}")
     
     def _render_image_placeholder(self, layout_box, x, y, width, height, element):
-        """
-        Render a placeholder for an image that is loading or failed to load.
-        
-        Args:
-            layout_box: The layout box of the image element
-            x: X coordinate
-            y: Y coordinate
-            width: Width of the image
-            height: Height of the image
-            element: The image element
-        """
+        """Render a placeholder while the image is loading."""
         try:
-            # Create a rectangle as placeholder
-            rect_item = self.canvas.create_rectangle(
+            # Create placeholder rectangle
+            placeholder = self.canvas.create_rectangle(
                 x, y, x + width, y + height,
-                fill="#f0f0f0",
-                outline="#cccccc"
+                outline='#CCCCCC',
+                fill='#EEEEEE',
+                tags=(f'element:{element.id}' if hasattr(element, 'id') and element.id else '',
+                      f'loading_{element.get_attribute("src")}')
             )
-            self.canvas_items.append(rect_item)
+            self.canvas_items.append(placeholder)
             
-            # Add an icon or text to indicate loading
-            text_item = self.canvas.create_text(
+            # Add loading indicator
+            label = self.canvas.create_text(
                 x + width/2, y + height/2,
-                text="Loading...",
-                font=("Arial", 10),
-                fill="#666666"
+                text="🖼️",
+                font=(self.fonts['default'][0], 14),
+                fill='#999999',
+                tags=(f'element:{element.id}' if hasattr(element, 'id') and element.id else '',
+                      f'loading_{element.get_attribute("src")}')
             )
-            self.canvas_items.append(text_item)
+            self.canvas_items.append(label)
             
-            # If alt text is available, display it
-            if hasattr(element, 'getAttribute'):
-                alt_text = element.getAttribute('alt')
+            # If alt text is available, display it below the icon
+            if hasattr(element, 'get_attribute'):
+                alt_text = element.get_attribute('alt')
                 if alt_text:
-                    alt_item = self.canvas.create_text(
-                        x + width/2, y + height/2 + 15,
+                    alt_label = self.canvas.create_text(
+                        x + width/2, y + height/2 + 20,
                         text=alt_text,
-                        font=("Arial", 9),
-                        fill="#333333"
+                        font=(self.fonts['default'][0], 10),
+                        fill='#666666',
+                        tags=(f'element:{element.id}' if hasattr(element, 'id') and element.id else '',
+                              f'loading_{element.get_attribute("src")}')
                     )
-                    self.canvas_items.append(alt_item)
+                    self.canvas_items.append(alt_label)
                     
-            logging.debug(f"Rendered image placeholder at ({x}, {y}) with dimensions {width}x{height}")
+            logger.debug(f"Rendered image placeholder at ({x}, {y}) with dimensions {width}x{height}")
         except Exception as e:
-            logging.error(f"Error rendering image placeholder: {e}")
+            logger.error(f"Error rendering image placeholder: {e}")
 
     def _render_form_element(self, layout_box: LayoutBox, x: int, y: int, width: int, height: int) -> None:
         """
@@ -2896,71 +2896,26 @@ class HTML5Renderer:
             width: Width of the element
             height: Height of the element
         """
-        element = layout_box.element
-        if not element or not hasattr(element, 'tag_name'):
-            return
-            
-        # Get positioning information from layout box
-        x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
-        y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
-        
-        # Get width and height from box metrics, with fallbacks
-        width = layout_box.box_metrics.content_width
-        height = layout_box.box_metrics.content_height
-        
-        # Ensure width and height are numeric and positive
-        if width == 'auto' or not isinstance(width, (int, float)) or width <= 0:
-            width = 200  # Default width for form elements
-        if height == 'auto' or not isinstance(height, (int, float)) or height <= 0:
-            height = 30  # Default height for form elements
-            
-        # Limit width to viewport
-        width = min(width, self.viewport_width - 40)
-            
-        tag_name = element.tag_name.lower()
-        
-        # Get attributes
-        element_type = element.get_attribute('type') if hasattr(element, 'get_attribute') else None
-        element_value = element.get_attribute('value') if hasattr(element, 'get_attribute') else None
-        element_placeholder = element.get_attribute('placeholder') if hasattr(element, 'get_attribute') else None
-        element_name = element.get_attribute('name') if hasattr(element, 'get_attribute') else None
-        
-        # Default values
-        if not element_type and tag_name == 'input':
-            element_type = 'text'  # Default input type is text
-        if not element_value:
-            element_value = ''
-            
-        # Different dimensions based on input type
-        if tag_name == 'input' and element_type in ['submit', 'button', 'reset']:
-            # Buttons are typically shorter but taller
-            if int(width) > 150:
-                width = 150
-            height = max(height, 32)  # Ensure buttons have enough height
-        elif tag_name == 'textarea':
-            # Textareas are typically larger
-            height = max(height, 100)
-            width = max(width, 250)
-        elif tag_name == 'select':
-            # Select dropdown needs enough height for the arrow
-            height = max(height, 32)
-        
-        # Ensure minimum height for all form elements
-        height = max(height, 24)
-        
-        # Set the height back to the layout box to ensure proper layout
-        layout_box.box_metrics.content_height = height
-        layout_box._update_box_dimensions()
-        
-        # Log the form element rendering
-        logger.debug(f"Rendered form element {tag_name} at ({x}, {y}) with dimensions {width}x{height}")
-        
-        # Render different form elements
         try:
+            element = layout_box.element
+            if not element or not hasattr(element, 'tag_name'):
+                return
+                
+            tag_name = element.tag_name.lower()
+            
+            # Get attributes
+            element_type = element.get_attribute('type') if hasattr(element, 'get_attribute') else None
+            element_value = element.get_attribute('value') if hasattr(element, 'get_attribute') else None
+            
+            # Default values
+            if not element_type and tag_name == 'input':
+                element_type = 'text'  # Default input type is text
+            if not element_value:
+                element_value = ''
+                
             if tag_name == 'input':
-                # Handle different input types
                 if element_type in ['text', 'password', 'email', 'number', 'tel', 'url', None]:
-                    # Create a rectangle to represent a text input
+                    # Create a text input
                     input_rect = self.canvas.create_rectangle(
                         x, y, x + width, y + height,
                         outline="#cccccc",
@@ -2968,224 +2923,50 @@ class HTML5Renderer:
                     )
                     self.canvas_items.append(input_rect)
                     
-                    # Add text content (value or placeholder)
-                    text_content = element_value if element_value else element_placeholder if element_placeholder else ''
-                    text_color = "#333333" if element_value else "#999999"  # Gray for placeholder
-                    
+                    # Add text content
                     text_item = self.canvas.create_text(
-                        x + 5, y + (height // 2),
-                        text=text_content,
-                        font=("Arial", 12),
-                        fill=text_color,
-                        anchor="w"  # West anchor (left-middle)
-                    )
-                    self.canvas_items.append(text_item)
-                    
-                elif element_type in ['submit', 'button', 'reset']:
-                    # Create a button
-                    button_text = element_value if element_value else element_type.capitalize()
-                    
-                    button = self._render_button_element(
-                        x, y, width, height, 
-                        button_text, 
-                        element
-                    )
-                    
-                elif element_type == 'checkbox':
-                    # Create a checkbox
-                    checkbox_size = min(16, height)
-                    checkbox = self.canvas.create_rectangle(
-                        x, y + (height - checkbox_size) // 2, 
-                        x + checkbox_size, y + (height + checkbox_size) // 2,
-                        outline="#333333",
-                        fill="#ffffff"
-                    )
-                    self.canvas_items.append(checkbox)
-                    
-                    # Add a check mark if checked
-                    is_checked = element.get_attribute('checked') if hasattr(element, 'get_attribute') else False
-                    if is_checked:
-                        checkmark = self.canvas.create_line(
-                            x + 3, y + (height) // 2,
-                            x + 7, y + (height + checkbox_size) // 2 - 3,
-                            x + checkbox_size - 3, y + (height - checkbox_size) // 2 + 3,
-                            fill="#333333",
-                            width=2
-                        )
-                        self.canvas_items.append(checkmark)
-                    
-                    # Add label if there's text
-                    if element_value:
-                        label = self.canvas.create_text(
-                            x + checkbox_size + 5, y + height // 2,
-                            text=element_value,
-                            font=("Arial", 12),
-                            fill="#333333",
-                            anchor="w"
-                        )
-                        self.canvas_items.append(label)
-                        
-                elif element_type == 'radio':
-                    # Create a radio button
-                    radio_size = min(16, height)
-                    radio = self.canvas.create_oval(
-                        x, y + (height - radio_size) // 2, 
-                        x + radio_size, y + (height + radio_size) // 2,
-                        outline="#333333",
-                        fill="#ffffff"
-                    )
-                    self.canvas_items.append(radio)
-                    
-                    # Add a dot if checked
-                    is_checked = element.get_attribute('checked') if hasattr(element, 'get_attribute') else False
-                    if is_checked:
-                        dot_size = radio_size - 6
-                        dot = self.canvas.create_oval(
-                            x + 3, y + (height - dot_size) // 2, 
-                            x + 3 + dot_size, y + (height + dot_size) // 2,
-                            outline="",
-                            fill="#333333"
-                        )
-                        self.canvas_items.append(dot)
-                    
-                    # Add label if there's text
-                    if element_value:
-                        label = self.canvas.create_text(
-                            x + radio_size + 5, y + height // 2,
-                            text=element_value,
-                            font=("Arial", 12),
-                            fill="#333333",
-                            anchor="w"
-                        )
-                        self.canvas_items.append(label)
-                        
-                else:
-                    # Default input rendering
-                    input_rect = self.canvas.create_rectangle(
-                        x, y, x + width, y + height,
-                        outline="#cccccc",
-                        fill="#ffffff"
-                    )
-                    self.canvas_items.append(input_rect)
-                
-            elif tag_name == 'button':
-                # Render button
-                button_text = ''
-                if hasattr(element, 'text_content') and element.text_content:
-                    button_text = element.text_content
-                elif element_value:
-                    button_text = element_value
-                else:
-                    button_text = "Button"
-                    
-                self._render_button_element(
-                    x, y, width, height, 
-                    button_text, 
-                    element
-                )
-                
-            elif tag_name == 'select':
-                # Create a select dropdown
-                select_rect = self.canvas.create_rectangle(
-                    x, y, x + width, y + height,
-                    outline="#cccccc",
-                    fill="#ffffff"
-                )
-                self.canvas_items.append(select_rect)
-                
-                # Add dropdown arrow
-                arrow_x = x + width - 20
-                arrow_y = y + height // 2
-                arrow = self.canvas.create_polygon(
-                    arrow_x, arrow_y - 5,
-                    arrow_x + 10, arrow_y - 5,
-                    arrow_x + 5, arrow_y + 5,
-                    fill="#333333"
-                )
-                self.canvas_items.append(arrow)
-                
-                # Add selected option text if available
-                selected_text = ''
-                if hasattr(element, 'value') and element.value:
-                    selected_text = element.value
-                elif element_value:
-                    selected_text = element_value
-                elif hasattr(element, 'child_nodes'):
-                    # Try to find selected option
-                    for child in element.child_nodes:
-                        if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
-                            # Check if this option is selected
-                            is_selected = child.get_attribute('selected') if hasattr(child, 'get_attribute') else False
-                            if is_selected:
-                                if hasattr(child, 'text_content'):
-                                    selected_text = child.text_content
-                                break
-                    
-                    # If no selected option found, use first option
-                    if not selected_text:
-                        for child in element.child_nodes:
-                            if hasattr(child, 'tag_name') and child.tag_name.lower() == 'option':
-                                if hasattr(child, 'text_content'):
-                                    selected_text = child.text_content
-                                break
-                
-                # Render selected text
-                if selected_text:
-                    text_item = self.canvas.create_text(
-                        x + 5, y + height // 2,
-                        text=selected_text,
+                        x + 5, y + height/2,
+                        text=element_value,
                         font=("Arial", 12),
                         fill="#333333",
                         anchor="w"
                     )
                     self.canvas_items.append(text_item)
-                
-            elif tag_name == 'textarea':
-                # Create a textarea
-                textarea_rect = self.canvas.create_rectangle(
-                    x, y, x + width, y + height,
-                    outline="#cccccc",
-                    fill="#ffffff"
-                )
-                self.canvas_items.append(textarea_rect)
-                
-                # Add text content
-                text_content = ''
-                if hasattr(element, 'text_content') and element.text_content:
-                    text_content = element.text_content
-                elif hasattr(element, 'value') and element.value:
-                    text_content = element.value
-                elif element_value:
-                    text_content = element_value
-                elif element_placeholder:
-                    text_content = element_placeholder
                     
-                text_item = self.canvas.create_text(
-                    x + 5, y + 5,
-                    text=text_content,
-                    font=("Arial", 12),
-                    fill="#333333" if text_content != element_placeholder else "#999999",
-                    anchor="nw",
-                    width=width - 10  # Allow text wrapping
-                )
-                self.canvas_items.append(text_item)
+                elif element_type == 'checkbox':
+                    # Create checkbox
+                    checkbox_size = min(16, height)
+                    checkbox = self.canvas.create_rectangle(
+                        x, y + (height - checkbox_size)/2,
+                        x + checkbox_size, y + (height + checkbox_size)/2,
+                        outline="#333333",
+                        fill="#ffffff"
+                    )
+                    self.canvas_items.append(checkbox)
+                    
+                    # Add label if there's text
+                    if element_value:
+                        label = self.canvas.create_text(
+                            x + checkbox_size + 5, y + height/2,
+                            text=element_value,
+                            font=("Arial", 12),
+                            fill="#333333",
+                            anchor="w"
+                        )
+                        self.canvas_items.append(label)
+            
+            elif tag_name == 'button':
+                self._render_button_element(x, y, width, height, element_value or "Button", element)
+                
         except Exception as e:
             logger.error(f"Error rendering form element: {e}")
-            # Render a basic fallback to at least show something
-            fallback_rect = self.canvas.create_rectangle(
+            # Render fallback
+            fallback = self.canvas.create_rectangle(
                 x, y, x + width, y + height,
-                outline="#ff0000",
-                fill="#ffeeee"
+                outline="#cccccc",
+                fill="#f0f0f0"
             )
-            self.canvas_items.append(fallback_rect)
-            
-            fallback_text = self.canvas.create_text(
-                x + width // 2, y + height // 2,
-                text=f"{tag_name}",
-                font=("Arial", 9),
-                fill="#ff0000"
-            )
-            self.canvas_items.append(fallback_text)
+            self.canvas_items.append(fallback)
 
     def _layout_box(self, layout_box: LayoutBox, x: int, y: int, container_width: int) -> None:
         """

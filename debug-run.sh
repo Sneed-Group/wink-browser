@@ -1,6 +1,6 @@
 rm debug.log
 rm errors.log
-python3 main.py --debug > debug.log 2>&1 &
+python3 main.py --debug $1 > debug.log 2>&1 &
 wait
 echo "**Broswer warnings BELOW**: " > errors.log
 cat debug.log | grep WARNING >> errors.log
