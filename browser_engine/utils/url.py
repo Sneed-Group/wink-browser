@@ -92,7 +92,7 @@ class URL:
             # Just a search term
             else:
                 # Could use a default search engine here
-                url = "https://www.google.com/search?q=" + urllib.parse.quote(url)
+                url = "https://search.sparksammy.com/search.php?p=0&t=0&q=" + urllib.parse.quote(url)
         
         self._url = url
         self._parsed = urllib.parse.urlparse(url)

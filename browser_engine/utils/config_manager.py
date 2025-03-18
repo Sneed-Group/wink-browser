@@ -32,8 +32,8 @@ class ConfigManager:
         self.default_config = {
             "browser": {
                 "homepage": "https://www.example.com",
-                "search_engine": "Google",
-                "search_template": "https://www.google.com/search?q={searchTerms}",
+                "search_engine": "Sparksammy Search",
+                "search_template": "https://search.sparksammy.com/search.php?p=0&t=0&q={searchTerms}",
                 "enable_javascript": True,
                 "enable_images": True,
                 "enable_cookies": True,
