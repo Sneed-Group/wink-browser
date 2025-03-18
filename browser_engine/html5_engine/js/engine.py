@@ -1129,7 +1129,10 @@ class JSEngine:
                             if script_content:
                                 logger.info(f"Successfully loaded script from {src}")
                                 sanitized_content = self._sanitize_script_content(script_content)
-                                self.evaluate(sanitized_content)
+                                try:
+                                    self.evaluate(sanitized_content)
+                                except Exception as e:
+                                    logger.error(f"Error in JS evaluation: {e}")
                             else:
                                 logger.warning(f"Failed to load script from {src}")
                     except Exception as e:

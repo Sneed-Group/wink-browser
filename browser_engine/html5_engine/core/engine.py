@@ -111,7 +111,10 @@ class HTML5Engine:
         self._render()
         
         # Execute scripts
-        self.js_engine.execute_scripts(self.document)
+        try:
+            self.js_engine.execute_scripts(self.document)
+        except Exception as e:
+            self.logger.error(f"Error executing scripts: {e}")
         
         # Trigger load event
         self._trigger_load()
