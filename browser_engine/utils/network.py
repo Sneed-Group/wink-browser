@@ -25,7 +25,7 @@ class NetworkManager:
     
     # Default user agents
     USER_AGENTS = {
-        "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36 Wink/0.1",
+        "default":  "Wink/1.0 (MysteryOS 10.0; Myst1k; SNEED_1kb_ARCH) WinkEngine/1.0 (HTML/Markdown, like Awesome) WinkBrowser/1.0",
         "chrome": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
         "firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0",
         "android": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.104 Mobile Safari/537.36",

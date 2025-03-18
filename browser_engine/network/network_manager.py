@@ -95,7 +95,7 @@ class NetworkManager:
         
         # Set user agent
         session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "User-Agent": "Wink/1.0 (MysteryOS 10.0; Myst1k; SNEED_1kb_ARCH) WinkEngine/1.0 (HTML/Markdown, like Awesome) WinkBrowser/1.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
