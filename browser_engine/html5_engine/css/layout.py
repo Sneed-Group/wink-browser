@@ -536,8 +536,26 @@ class LayoutEngine:
                 # Get base spacing for both elements
                 current_base = base_spacing.get(current_tag, 0.02)  # Default to 2%
                 prev_base = base_spacing.get(prev_element_tag, 0.02)  # Default to 2%
-                # Use half of each element's base spacing to create the gap
-                spacing = ((current_base + prev_base) / 2) * container_width
+                
+                # Special case handling for divs and spans to prevent overlapping
+                if current_tag == 'div' and prev_element_tag == 'div':
+                    # Ensure minimum spacing between consecutive divs
+                    spacing = max((current_base + prev_base) / 2, 0.08) * container_width  # Increased to 8%
+                elif current_tag == 'span' and prev_element_tag == 'span':
+                    # Ensure minimum spacing between consecutive spans
+                    spacing = max((current_base + prev_base) / 2, 0.02) * container_width
+                elif current_tag == 'div' or prev_element_tag == 'div':
+                    # Ensure minimum spacing when div is next to any other element
+                    spacing = max((current_base + prev_base) / 2, 0.06) * container_width  # Increased to 6%
+                    
+                    # Add extra spacing between divs and headings or paragraphs
+                    if (current_tag and current_tag.startswith('h')) or (prev_element_tag and prev_element_tag.startswith('h')):
+                        spacing = max(spacing, 0.10 * container_width)  # 10% for headings
+                    elif current_tag == 'p' or prev_element_tag == 'p' or current_tag == 'a' or prev_element_tag == 'a':
+                        spacing = max(spacing, 0.07 * container_width)  # 7% for paragraphs
+                else:
+                    # Use half of each element's base spacing to create the gap
+                    spacing = ((current_base + prev_base) / 2) * container_width
             
             # Update y position with spacing if not the first element
             if prev_element_tag:
