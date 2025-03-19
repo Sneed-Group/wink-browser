@@ -1221,8 +1221,52 @@ class HTML5Renderer:
             self._render_text_content(layout_box)
             
             # Special handling for specific elements
+            # Check if this is a link element
             if tag_name == 'a':
-                self._make_link_clickable(layout_box, x, y, width, height)
+                # Only use old link implementation if:
+                # 1. Link is not inside a paragraph, or
+                # 2. Link is inside an empty paragraph
+                parent_tag = ""
+                parent_element = None
+                if hasattr(layout_box.element, 'parent_node') and layout_box.element.parent_node:
+                    parent_element = layout_box.element.parent_node
+                    if hasattr(parent_element, 'tag_name'):
+                        parent_tag = parent_element.tag_name.lower()
+                
+                use_old_implementation = True
+                
+                # If parent is a paragraph, check if it has any non-link text content
+                if parent_tag == 'p':
+                    # First check using the mixed content detection logic used by _render_text_content
+                    # to ensure consistency with how paragraphs with links are detected
+                    has_links = False
+                    has_text = False
+                    
+                    if hasattr(parent_element, 'child_nodes'):
+                        for child in parent_element.child_nodes:
+                            if hasattr(child, 'tag_name') and child.tag_name.lower() == 'a':
+                                has_links = True
+                            elif hasattr(child, 'node_type') and child.node_type == 3:  # Text node
+                                if hasattr(child, 'node_value') and child.node_value and child.node_value.strip():
+                                    has_text = True
+                    
+                    # If paragraph has both links and text, don't use old implementation
+                    if has_links and has_text:
+                        use_old_implementation = False
+                    else:
+                        # Fallback check - if paragraph has any text content at all
+                        has_text_content = False
+                        if hasattr(parent_element, 'textContent'):
+                            has_text_content = bool(parent_element.textContent.strip())
+                        
+                        # Only use old implementation if paragraph is empty (no text content)
+                        use_old_implementation = not has_text_content
+                
+                if use_old_implementation:
+                    self._make_link_clickable(layout_box, x, y, width, height)
+                # Debug logging to help diagnose the issue
+                else:
+                    logger.debug(f"Skipping old link implementation for link in non-empty paragraph")
             elif tag_name == 'hr':
                 self._render_horizontal_rule(layout_box, x, y, width, height)
             elif tag_name == 'br':
@@ -2534,6 +2578,24 @@ class HTML5Renderer:
         if not href:
             return
             
+        # Double-check: don't apply the old implementation to links in non-empty paragraphs
+        if hasattr(layout_box.element, 'parent_node') and layout_box.element.parent_node:
+            parent = layout_box.element.parent_node
+            if hasattr(parent, 'tag_name') and parent.tag_name.lower() == 'p':
+                # Check if paragraph contains text nodes
+                has_text = False
+                if hasattr(parent, 'child_nodes'):
+                    for child in parent.child_nodes:
+                        if hasattr(child, 'node_type') and child.node_type == 3:  # Text node
+                            if hasattr(child, 'node_value') and child.node_value and child.node_value.strip():
+                                has_text = True
+                                break
+                
+                # Skip if paragraph has text content (should be handled by _render_paragraph_with_links)
+                if has_text:
+                    logger.debug(f"Skipping old link implementation for link in non-empty paragraph (double-check)")
+                    return
+            
         # Create a clickable area
         clickable_area = self.canvas.create_rectangle(
             x, y, x + width, y + height,
@@ -2549,7 +2611,7 @@ class HTML5Renderer:
         # Change cursor to hand when hovering over the link
         self.canvas.tag_bind(clickable_area, '<Enter>', lambda event: self.canvas.config(cursor='hand2'))
         self.canvas.tag_bind(clickable_area, '<Leave>', lambda event: self.canvas.config(cursor=''))
-        
+    
     def _on_link_click(self, event, url: str) -> None:
         """
         Handle link click events.
@@ -3011,6 +3073,7 @@ class HTML5Renderer:
                 
                 if has_links and has_text:
                     # This is a paragraph with inline links - use special rendering
+                    logger.debug(f"Using special paragraph with links rendering for {element.tag_name}")
                     self._render_paragraph_with_links(layout_box)
                     return
             
@@ -3124,6 +3187,7 @@ class HTML5Renderer:
         """
         try:
             element = layout_box.element
+            logger.debug(f"Rendering paragraph with links: {element.tag_name}")
             
             # Get paragraph position and dimensions
             x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
@@ -3198,6 +3262,8 @@ class HTML5Renderer:
                     link_text = child.text_content if hasattr(child, 'text_content') else ""
                     href = child.get_attribute('href') if hasattr(child, 'get_attribute') else ""
                     
+                    logger.debug(f"Rendering link in paragraph: {link_text} -> {href}")
+                    
                     if not link_text.strip():
                         continue
                     
@@ -3255,7 +3321,6 @@ class HTML5Renderer:
                                              lambda event: self.canvas.config(cursor='hand2'))
                         self.canvas.tag_bind(clickable_area, '<Leave>', 
                                              lambda event: self.canvas.config(cursor=''))
-                        
                         # Update position for next element
                         current_x += actual_width
                         current_line_width += actual_width
