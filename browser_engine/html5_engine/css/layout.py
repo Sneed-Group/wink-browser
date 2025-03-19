@@ -645,9 +645,6 @@ class LayoutEngine:
         if isinstance(padding_top, str):
             padding_top = 0 if padding_top == 'auto' else float(padding_top)
         
-        x = layout_box.box_metrics.x + margin_left + border_left + padding_left
-        y = layout_box.box_metrics.y + margin_top + border_top + padding_top
-        
         # Get content width safely
         content_width = layout_box.box_metrics.content_width
         if isinstance(content_width, str):
@@ -676,58 +673,107 @@ class LayoutEngine:
         else:
             child_container_width = content_width
         
-        # Current y within the content box
+        # Current position within the content box
+        current_x = content_x
         current_y = content_y
-        current_line_width = 0
         line_height = 0
         
-        # Layout children
+        # Determine if we're within a paragraph context
+        is_paragraph = False
+        if layout_box.element and hasattr(layout_box.element, 'tag_name'):
+            is_paragraph = layout_box.element.tag_name.lower() in ['p', 'div', 'span', 'em', 'strong', 'i', 'b']
+        
+        # For non-paragraph contexts, use standard block or grid layout
+        if not is_paragraph:
+            # Default spacing for elements in non-paragraph contexts
+            min_spacing = 10
+            
+            for child in layout_box.children:
+                # Layout the child
+                child.layout(child_container_width, current_x, current_y)
+                
+                # Get child dimensions
+                child_width = 0
+                if isinstance(child.box_metrics.margin_box_width, (int, float)):
+                    child_width = float(child.box_metrics.margin_box_width)
+                
+                child_height = 0
+                if isinstance(child.box_metrics.margin_box_height, (int, float)):
+                    child_height = float(child.box_metrics.margin_box_height)
+                
+                # Move right for next child
+                current_x += child_width + min_spacing
+                
+                # Update line height
+                line_height = max(line_height, child_height)
+            
+            return
+        
+        # Special handling for paragraph context - continuous text flow with embedded links
+        # First, collect all children to determine their content and layout needs
+        paragraph_children = []
+        
         for child in layout_box.children:
-            child.layout(child_container_width, content_x, current_y)
+            child_info = {
+                'child': child,
+                'type': None,
+                'text': '',
+                'is_link': False,
+                'width': 0,
+                'height': 0
+            }
             
-            # Get child's margin box width safely
-            child_margin_box_width = child.box_metrics.margin_box_width
-            if isinstance(child_margin_box_width, str):
-                try:
-                    child_margin_box_width = float(child_margin_box_width)
-                except (ValueError, TypeError):
-                    child_margin_box_width = 0
-            elif isinstance(child_margin_box_width, (int, float)):
-                child_margin_box_width = float(child_margin_box_width)
+            # Determine element type
+            if child.element and hasattr(child.element, 'tag_name'):
+                child_info['type'] = child.element.tag_name.lower()
+                child_info['is_link'] = child_info['type'] == 'a'
+            
+            # Extract text content
+            if child.element and hasattr(child.element, 'text_content') and child.element.text_content:
+                child_info['text'] = child.element.text_content
+            
+            paragraph_children.append(child_info)
+        
+        # Now layout the children in a continuous flow
+        max_width = content_width
+        line_width = 0
+        word_spacing = 2  # Small spacing between words
+        
+        for child_info in paragraph_children:
+            child = child_info['child']
+            
+            # Calculate the child's width (temporary layout)
+            child.layout(child_container_width, 0, 0)  # Temporary layout to get dimensions
+            
+            if isinstance(child.box_metrics.margin_box_width, (int, float)):
+                child_width = float(child.box_metrics.margin_box_width)
             else:
-                child_margin_box_width = 0
-            
-            # Update position for next child
-            x += child_margin_box_width
-            current_line_width += child_margin_box_width
-            
-            # Add minimum spacing between inline elements to prevent merging
-            min_inline_spacing = 10  # Minimum pixel spacing between inline elements
-            
-            # Ensure child_margin_box_width is a number before adding
-            if isinstance(child_margin_box_width, (int, float)):
-                # Use a numeric value for spacing
-                content_x += child_margin_box_width + min_inline_spacing
+                child_width = 0
+                
+            if isinstance(child.box_metrics.margin_box_height, (int, float)):
+                child_height = float(child.box_metrics.margin_box_height)
             else:
-                # If we couldn't convert to a number, add a safe minimum spacing
-                content_x += min_inline_spacing
+                child_height = 0
             
-            # Get child's margin box height safely
-            child_margin_box_height = child.box_metrics.margin_box_height
-            if isinstance(child_margin_box_height, str):
-                try:
-                    child_margin_box_height = float(child_margin_box_height)
-                except (ValueError, TypeError):
-                    child_margin_box_height = 0
-            elif isinstance(child_margin_box_height, (int, float)):
-                child_margin_box_height = float(child_margin_box_height)
-            else:
-                child_margin_box_height = 0
+            # Update child info
+            child_info['width'] = child_width
+            child_info['height'] = child_height
             
-            line_height = max(line_height, child_margin_box_height)
+            # Check if we need to wrap to next line
+            if line_width + child_width > max_width:
+                # Move to next line
+                current_x = content_x
+                current_y += line_height + 2  # Small vertical spacing between lines
+                line_width = 0
+                line_height = 0
             
-            # Move down for next child (block layout)
-            current_y += child_margin_box_height
+            # Position child at current position
+            child.layout(child_container_width, current_x, current_y)
+            
+            # Update current position
+            current_x += child_width + word_spacing
+            line_width += child_width + word_spacing
+            line_height = max(line_height, child_height)
 
     def create_layout_tree(self, document: Document) -> LayoutBox:
         """

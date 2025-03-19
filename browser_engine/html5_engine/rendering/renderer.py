@@ -2996,6 +2996,26 @@ class HTML5Renderer:
             # Mark element as processed
             self.processed_nodes.add(element_id)
             
+            # Check if this is a paragraph that might contain inline links
+            if hasattr(element, 'tag_name') and element.tag_name.lower() in ('p', 'div', 'span') and hasattr(element, 'child_nodes'):
+                # Check if paragraph contains mixed content with links
+                has_links = False
+                has_text = False
+                
+                for child in element.child_nodes:
+                    if hasattr(child, 'tag_name') and child.tag_name.lower() == 'a':
+                        has_links = True
+                    elif hasattr(child, 'node_type') and child.node_type == 3:  # Text node
+                        if hasattr(child, 'node_value') and child.node_value and child.node_value.strip():
+                            has_text = True
+                
+                if has_links and has_text:
+                    # This is a paragraph with inline links - use special rendering
+                    self._render_paragraph_with_links(layout_box)
+                    return
+            
+            # Standard text rendering for elements without inline links
+            
             # Get text content
             text = None
             if hasattr(element, 'text_content'):
@@ -3094,6 +3114,312 @@ class HTML5Renderer:
             
         except Exception as e:
             logger.error(f"Error in text rendering: {e}")
+    
+    def _render_paragraph_with_links(self, layout_box):
+        """
+        Render a paragraph with inline links, maintaining proper text flow.
+        
+        Args:
+            layout_box: The layout box for the paragraph element
+        """
+        try:
+            element = layout_box.element
+            
+            # Get paragraph position and dimensions
+            x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
+            y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
+            
+            # Calculate available width for paragraph
+            element_type = 'block' if layout_box.display == 'block' else 'inline'
+            available_width = self._calculate_dimension(
+                layout_box.box_metrics.content_width,
+                self.viewport_width,
+                element_type,
+                'width',
+                layout_box
+            )
+            
+            if available_width <= 0:
+                available_width = None  # Let text flow naturally if no width constraint
+            
+            # Default font settings
+            font_family = "Arial"
+            font_size = 12
+            font_weight = "normal"
+            font_style = "normal"
+            
+            # Get font settings from computed style
+            if hasattr(layout_box, 'computed_style'):
+                font_family = layout_box.computed_style.get('font-family', font_family)
+                font_size_str = layout_box.computed_style.get('font-size', str(font_size))
+                font_weight = layout_box.computed_style.get('font-weight', font_weight)
+                font_style = layout_box.computed_style.get('font-style', font_style)
+                
+                # Convert font size to integer
+                try:
+                    if isinstance(font_size_str, str):
+                        if font_size_str.endswith('px'):
+                            font_size = int(font_size_str[:-2])
+                        else:
+                            font_size = int(font_size_str)
+                    else:
+                        font_size = int(font_size_str)
+                except (ValueError, TypeError):
+                    font_size = 12  # Fallback to default size
+            
+            # Text color from computed style
+            default_color = "#000000"
+            if hasattr(layout_box, 'computed_style'):
+                default_color = layout_box.computed_style.get('color', default_color)
+            
+            # Create font configuration
+            base_font = (font_family, font_size)
+            
+            if font_weight == 'bold':
+                base_font = (font_family, font_size, 'bold')
+            if font_style == 'italic':
+                if len(base_font) == 2:
+                    base_font = (font_family, font_size, 'italic')
+                else:
+                    base_font = (font_family, font_size, 'bold italic')
+            
+            # Track current position for text flow
+            current_x = x
+            current_y = y
+            line_height = font_size * 1.2  # Estimate line height
+            max_width = available_width if available_width else self.viewport_width - x - 20
+            current_line_width = 0
+            
+            # Process mixed content
+            for child in element.child_nodes:
+                # Handle link elements
+                if hasattr(child, 'tag_name') and child.tag_name.lower() == 'a':
+                    # Get link text and href
+                    link_text = child.text_content if hasattr(child, 'text_content') else ""
+                    href = child.get_attribute('href') if hasattr(child, 'get_attribute') else ""
+                    
+                    if not link_text.strip():
+                        continue
+                    
+                    # Estimate text width (rough approximation)
+                    # For precise measurement, we would need to create and measure temporary text
+                    char_width = font_size * 0.6  # Average character width
+                    text_width = len(link_text) * char_width
+                    
+                    # Check if we need to wrap to next line
+                    if current_line_width + text_width > max_width:
+                        current_x = x
+                        current_y += line_height
+                        current_line_width = 0
+                    
+                    # Create link text
+                    link_color = self.colors.get('link', '#0000EE')
+                    link_font = base_font
+                    
+                    # Add underline for links
+                    if len(link_font) == 2:
+                        link_font = (link_font[0], link_font[1], 'underline')
+                    else:
+                        link_font = (link_font[0], link_font[1], link_font[2] + ' underline')
+                    
+                    # Render link text
+                    link_item = self.canvas.create_text(
+                        current_x, current_y,
+                        text=link_text,
+                        font=link_font,
+                        fill=link_color,
+                        anchor="nw"
+                    )
+                    self.canvas_items.append(link_item)
+                    
+                    # Get actual text dimensions
+                    bbox = self.canvas.bbox(link_item)
+                    if bbox:
+                        actual_width = bbox[2] - bbox[0]
+                        actual_height = bbox[3] - bbox[1]
+                        
+                        # Make link clickable
+                        clickable_area = self.canvas.create_rectangle(
+                            current_x, current_y, 
+                            current_x + actual_width, current_y + actual_height,
+                            fill='',
+                            outline='',
+                            tags=('link', href)
+                        )
+                        self.canvas_items.append(clickable_area)
+                        
+                        # Bind click event
+                        self.canvas.tag_bind(clickable_area, '<Button-1>', 
+                                             lambda event, url=href: self._on_link_click(event, url))
+                        self.canvas.tag_bind(clickable_area, '<Enter>', 
+                                             lambda event: self.canvas.config(cursor='hand2'))
+                        self.canvas.tag_bind(clickable_area, '<Leave>', 
+                                             lambda event: self.canvas.config(cursor=''))
+                        
+                        # Update position for next element
+                        current_x += actual_width
+                        current_line_width += actual_width
+                        line_height = max(line_height, actual_height)
+                    else:
+                        # Fallback if we couldn't get bbox
+                        current_x += text_width
+                        current_line_width += text_width
+                
+                # Handle text nodes
+                elif hasattr(child, 'node_type') and child.node_type == 3:  # Text node
+                    if hasattr(child, 'node_value') and child.node_value:
+                        text = child.node_value.strip()
+                        
+                        if not text:
+                            continue
+                        
+                        # Estimate text width
+                        char_width = font_size * 0.6
+                        text_width = len(text) * char_width
+                        
+                        # Check if we need to wrap to next line
+                        if current_line_width + text_width > max_width:
+                            current_x = x
+                            current_y += line_height
+                            current_line_width = 0
+                        
+                        # Create text item
+                        text_item = self.canvas.create_text(
+                            current_x, current_y,
+                            text=text,
+                            font=base_font,
+                            fill=default_color,
+                            anchor="nw"
+                        )
+                        self.canvas_items.append(text_item)
+                        
+                        # Get actual text dimensions
+                        bbox = self.canvas.bbox(text_item)
+                        if bbox:
+                            actual_width = bbox[2] - bbox[0]
+                            actual_height = bbox[3] - bbox[1]
+                            
+                            # Update position for next element
+                            current_x += actual_width
+                            current_line_width += actual_width
+                            line_height = max(line_height, actual_height)
+                        else:
+                            # Fallback if we couldn't get bbox
+                            current_x += text_width
+                            current_line_width += text_width
+                
+                # Handle other inline elements
+                elif hasattr(child, 'tag_name'):
+                    # Handle other inline elements by rendering them at the current position
+                    # This could be improved to handle more types of inline elements properly
+                    tag_name = child.tag_name.lower()
+                    text = child.text_content if hasattr(child, 'text_content') else ""
+                    
+                    if not text.strip():
+                        continue
+                    
+                    # Estimate text width
+                    char_width = font_size * 0.6
+                    text_width = len(text) * char_width
+                    
+                    # Check if we need to wrap to next line
+                    if current_line_width + text_width > max_width:
+                        current_x = x
+                        current_y += line_height
+                        current_line_width = 0
+                    
+                    # Create text item
+                    text_item = self.canvas.create_text(
+                        current_x, current_y,
+                        text=text,
+                        font=base_font,
+                        fill=default_color,
+                        anchor="nw"
+                    )
+                    self.canvas_items.append(text_item)
+                    
+                    # Get actual text dimensions
+                    bbox = self.canvas.bbox(text_item)
+                    if bbox:
+                        actual_width = bbox[2] - bbox[0]
+                        actual_height = bbox[3] - bbox[1]
+                        
+                        # Update position for next element
+                        current_x += actual_width
+                        current_line_width += actual_width
+                        line_height = max(line_height, actual_height)
+                    else:
+                        # Fallback if we couldn't get bbox
+                        current_x += text_width
+                        current_line_width += text_width
+            
+            # Update the layout box content height based on the rendered text
+            total_height = current_y + line_height - y
+            layout_box.box_metrics.content_height = max(layout_box.box_metrics.content_height, total_height)
+            
+        except Exception as e:
+            logger.error(f"Error rendering paragraph with links: {e}")
+            # Fallback to standard text rendering if there was an error
+            self._render_regular_text_content(layout_box)
+    
+    def _render_regular_text_content(self, layout_box):
+        """
+        Standard text rendering for layout boxes that don't need special handling.
+        This is a fallback method.
+        
+        Args:
+            layout_box: The layout box to render text for
+        """
+        try:
+            element = layout_box.element
+            
+            # Get text content
+            text = None
+            if hasattr(element, 'text_content'):
+                text = element.text_content
+            elif hasattr(element, 'textContent'):
+                text = element.textContent
+            elif hasattr(element, 'text'):
+                text = element.text
+                
+            if not text:
+                # Try to get text from child nodes
+                text = self._extract_text_content(element)
+                
+            if not text or not text.strip():
+                return
+                
+            # Get positioning from box metrics
+            x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
+            y = layout_box.box_metrics.y + layout_box.box_metrics.padding_top + layout_box.box_metrics.border_top_width
+            
+            # Get font settings and other styling similar to _render_text_content
+            font_family = "Arial"
+            font_size = 12
+            
+            # Create text with proper wrapping
+            element_type = 'block' if layout_box.display == 'block' else 'inline'
+            available_width = self._calculate_dimension(
+                layout_box.box_metrics.content_width,
+                self.viewport_width,
+                element_type,
+                'width',
+                layout_box
+            )
+            
+            text_item = self.canvas.create_text(
+                x, y,
+                text=text.strip(),
+                font=(font_family, font_size),
+                fill="#000000",
+                anchor="nw",
+                width=available_width if available_width > 0 else None
+            )
+            
+            self.canvas_items.append(text_item)
+            
+        except Exception as e:
+            logger.error(f"Error in fallback text rendering: {e}")
     
     def _render_image_placeholder(self, layout_box, x, y, width, height, element):
         """Render a placeholder while the image is loading."""
