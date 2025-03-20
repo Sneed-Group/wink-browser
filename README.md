@@ -125,6 +125,18 @@ To create example extensions, run:
 python -m browser_engine.extensions.setup_extensions
 ```
 
+## Comparing and contrasting Wink to TempleOS
+
+***TempleOS and wink have a few similarities...***
+
+- They were both created/founded by a person diagnosed with paranoia
+- They were both created/founded by that one person, and the power of God. (If he exists.)
+- Both are spawns of some sort of "divine intervention..." (I was told in my dreams the specifications, Terry was "told by god" the specifications "god wanted")
+
+***...Although, my project and Terry's project have one major difference.***
+
+Mine is assisted by AI, his was made by himself (and God) alone. (Terry Davis would probably hate AI, if not then he would likely hate how I, the creator (Sparksammy/NodeMixaholic), use it.)
+
 ## Development
 
 ### Project Structure
@@ -142,18 +154,6 @@ wink-browser/
 └── requirements.txt         # Dependencies
 ```
 
-## Comparing and contrasting Wink to TempleOS
-
-***TempleOS and wink have a few similarities...***
-
-- They were both created/founded by a person diagnosed with paranoia
-- They were both created/founded by that one person, and the power of God. (If he exists.)
-- Both are spawns of some sort of "divine intervention..." (I was told in my dreams the specifications, Terry was "told by god" the specifications "god wanted")
-
-***...Although, my project and Terry's project have one major difference.***
-
-Mine is assisted by AI, his was made by himself (and God) alone. (Terry Davis would probably hate AI, if not then he would likely hate how I, the creator (Sparksammy/NodeMixaholic), use it.)
-
 ### Contributing
 
 1. Fork the repository
@@ -161,6 +161,12 @@ Mine is assisted by AI, his was made by himself (and God) alone. (Terry Davis wo
 3. Commit your changes: `git commit -am 'Add some feature'`
 4. Push to the branch: `git push origin feature-name`
 5. Submit a pull request
+
+## Describing how we use checkpoints in commit names.
+
+- Major/big/giant checkpoint - Used after quite a few major, now stable changes were made.
+- Checkpoint - used after some small-medium sized changes were made that are now stable.
+- Small/Tiny checkpoint - Used after several tiny changes known to be stable were made.
 
 ## License
 
