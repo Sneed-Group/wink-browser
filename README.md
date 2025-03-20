@@ -24,6 +24,7 @@ A modern, privacy-focused web browser built in Python.
 - **History Manager**: Tracks and manages browsing history
 - **Bookmark Manager**: Organizes and stores bookmarks
 - **Extensions System**: Secure, sandboxed browser extensions
+- **Secure, sanitized JavaScript**: Implements rigorous filtering and sandboxing to prevent malicious scripts from executing while maintaining some level of compatibility with standard web functionality
 
 ## Requirements
 
@@ -59,7 +60,7 @@ A modern, privacy-focused web browser built in Python.
 Wink Browser supports several command-line options:
 
 - **Regular Mode**: `python main.py [url]`
-- **Text-Only Mode**: `python main.py --text-only [url]` (Disables everything except plain text, including links, for faster, lighter browsing)
+- **Text-Only Mode**: `python main.py --text-only [url]` (Disables everything except plain text, including links and images, for faster, lighter browsing)
 - **Private Mode**: `python main.py --private [url]` (No history or cookies saved)
 - **Debug Mode**: `python main.py --debug [url]` (Shows detailed debug information)
 
@@ -110,7 +111,7 @@ link_handler.js,link_click
 
 ### Extension Security
 
-Extensions run in a secure sandbox with:
+Extensions run in an even more secure sandbox with:
 
 - JavaScript code filtering to block potentially harmful patterns
 - Limited API access based on permissions
