@@ -58,4 +58,7 @@ typing_extensions>=4.7.1  # For enhanced type hints
 PyYAML>=6.0.1  # For configuration
 
 # New JS execution dependency (replacing pyppeteer)
-dukpy>=0.3.0  # For JavaScript execution using an embedded JS engine 
+dukpy>=0.3.0  # For JavaScript execution using an embedded JS engine
+
+# Desktop binary building
+pyinstaller>=6.0.0  # For creating standalone desktop applications 

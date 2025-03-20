@@ -58,6 +58,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# Except our custom spec file
+!wink_browser.spec
 
 # Installer logs
 pip-log.txt
@@ -159,7 +161,8 @@ target/
 
 # PyInstaller
 *.manifest
-*.spec
+# Except our custom spec file
+!wink_browser.spec
 
 # Logs
 *.log 
