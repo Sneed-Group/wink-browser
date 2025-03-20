@@ -144,7 +144,7 @@ wink-browser/
 
 ## Comparing and contrasting Wink to TempleOS
 
-***TempleOS and wink have a couple of similarities...***
+***TempleOS and wink have a few similarities...***
 
 - They were both created/founded by a person diagnosed with paranoia
 - They were both created/founded by that one person, and the power of God. (If he exists.)
