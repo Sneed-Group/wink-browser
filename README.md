@@ -59,7 +59,7 @@ A modern, privacy-focused web browser built in Python.
 Wink Browser supports several command-line options:
 
 - **Regular Mode**: `python main.py [url]`
-- **Text-Only Mode**: `python main.py --text-only [url]` (Disables JavaScript for faster, lighter browsing)
+- **Text-Only Mode**: `python main.py --text-only [url]` (Disables everything except plain text, including links, for faster, lighter browsing)
 - **Private Mode**: `python main.py --private [url]` (No history or cookies saved)
 - **Debug Mode**: `python main.py --debug [url]` (Shows detailed debug information)
 
