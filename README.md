@@ -72,7 +72,7 @@ python main.py --private --text-only https://example.com
 
 - **SSL Certificate Errors**: If you encounter SSL certificate verification errors, the browser will automatically retry without verification as a fallback. This is not recommended for security-sensitive browsing.
   
-- **JavaScript Engine Issues**: The JavaScript engine may occasionally encounter event loop errors. If this happens, try using text-only mode (`--text-only` flag) which disables JavaScript execution.
+- **JavaScript Engine Issues**: The JavaScript engine may occasionally encounter event loop errors. If this happens, try using text-only mode (`--text-only` flag) which disables JavaScript execution. (Note that this also disables all links and images, so beware.)
 
 ## Configuration
 
@@ -169,7 +169,7 @@ This project is licensed under the Sammy Public License - see the LICENSE file f
 
 - [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) for HTML parsing
 - [cssutils](https://pypi.org/project/cssutils/) for CSS parsing
-- [js2py](https://github.com/vlasovskikh/js2py) for JavaScript execution
+- [dukpy](https://github.com/amol-/dukpy) for JavaScript execution
 - [Requests](https://requests.readthedocs.io/) for HTTP handling
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the UI 
 - [Python](https://python.org) for the programming language 
