@@ -141,6 +141,18 @@ wink-browser/
 └── requirements.txt         # Dependencies
 ```
 
+## Comparing and contrasting Wink to TempleOS
+
+***TempleOS and wink have a couple of similarities...***
+
+- They were both created/founded by a person diagnosed with paranoia
+- They were both created/founded by that one person, and the power of God. (If he exists.)
+- Both are spawns of some sort of "divine intervention..." (I was told in my dreams the specifications, Terry was "told by god" the specifications "god wanted")
+
+***...Although, my project and Terry's project have one major difference.***
+
+Mine is assisted by AI, his was made by himself (and God) alone. (Terry Davis would probably hate AI, if not then he would likely hate how I, the creator (Sparksammy/NodeMixaholic), use it.)
+
 ### Contributing
 
 1. Fork the repository
