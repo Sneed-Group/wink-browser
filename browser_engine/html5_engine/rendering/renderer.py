@@ -277,6 +277,8 @@ class HTML5Renderer:
         
         # Track processed nodes to prevent duplicates
         self.processed_nodes = set()
+        self.processed_rendered_paragraphs = set()
+        self.in_progress_paragraphs = set()
     
     def _init_fonts(self) -> None:
         """
@@ -412,12 +414,37 @@ class HTML5Renderer:
     
     def render(self, document: Document, layout: Optional[LayoutBox] = None) -> None:
         """
-        Render a document to the canvas.
+        Render the document.
         
         Args:
-            document: The DOM document to render
-            layout: Optional pre-computed layout box
+            document: The document to render
+            layout: Optional pre-computed layout to use
         """
+        logger.info("Rendering document")
+        start_time = time.time()
+        
+        # Store the document
+        self.document = document
+        
+        # Clear any previous render state
+        self._clear_canvas()
+        self.processed_nodes = set()
+        self.processed_rendered_paragraphs = set()
+        
+        try:
+            # Setup the document title
+            title_element = document.get_element_by_tag_name('title')
+            if title_element and hasattr(title_element, 'text_content'):
+                title = title_element.text_content
+                # Update the window title if we can
+                try:
+                    self.parent.master.title(f"{title} - Wink Browser")
+                except:
+                    pass
+        
+        except Exception as e:
+            logger.error(f"Error setting up document title: {e}")
+        
         # Enhanced debug logging for document state
         logger.debug(f"RENDER DEBUG: document is: {document}")
         logger.debug(f"RENDER DEBUG: document type is: {type(document)}")
@@ -2571,46 +2598,130 @@ class HTML5Renderer:
         """
         if not layout_box.element:
             return
+        
+        # Create a unique identifier for this element to check if already processed
+        element_id = f"{id(layout_box.element)}"
+        if element_id in self.processed_nodes:
+            logger.debug(f"Skipping already processed link element: {element_id}")
+            return
             
         # Get the href attribute
         href = layout_box.element.get_attribute('href') if hasattr(layout_box.element, 'get_attribute') else None
         
         if not href:
             return
-            
-        # Double-check: don't apply the old implementation to links in non-empty paragraphs
+        
+        # Only check parent node if we're sure the parent has already been rendered
+        # with paragraph-style method
         if hasattr(layout_box.element, 'parent_node') and layout_box.element.parent_node:
             parent = layout_box.element.parent_node
-            if hasattr(parent, 'tag_name') and parent.tag_name.lower() == 'p':
-                # Check if paragraph contains text nodes
-                has_text = False
-                if hasattr(parent, 'child_nodes'):
-                    for child in parent.child_nodes:
-                        if hasattr(child, 'node_type') and child.node_type == 3:  # Text node
-                            if hasattr(child, 'node_value') and child.node_value and child.node_value.strip():
-                                has_text = True
-                                break
-                
-                # Skip if paragraph has text content (should be handled by _render_paragraph_with_links)
-                if has_text:
-                    logger.debug(f"Skipping old link implementation for link in non-empty paragraph (double-check)")
-                    return
+            parent_id = f"{id(parent)}"
             
-        # Create a clickable area
-        clickable_area = self.canvas.create_rectangle(
-            x, y, x + width, y + height,
-            fill='',
-            outline='',
-            tags=('link', href)
+            # Check if parent has been rendered with paragraph style
+            if parent_id in self.processed_rendered_paragraphs:
+                logger.debug(f"Skipping link in already rendered paragraph: {element_id}")
+                self.processed_nodes.add(element_id)
+                return
+        
+        # Mark this element as processed to avoid duplicate rendering
+        self.processed_nodes.add(element_id)
+        
+        # For standalone links, create a clickable text with underline using the paragraph-style approach
+        logger.debug(f"Using paragraph-style rendering for standalone link: {href}")
+        
+        # Get font settings from computed style
+        font_family = "Arial"
+        font_size = 12
+        font_weight = "normal"
+        font_style = "normal"
+        
+        if hasattr(layout_box, 'computed_style'):
+            font_family = layout_box.computed_style.get('font-family', font_family)
+            font_size_str = layout_box.computed_style.get('font-size', str(font_size))
+            font_weight = layout_box.computed_style.get('font-weight', font_weight)
+            font_style = layout_box.computed_style.get('font-style', font_style)
+            
+            # Convert font size to integer
+            try:
+                if isinstance(font_size_str, str):
+                    if font_size_str.endswith('px'):
+                        font_size = int(font_size_str[:-2])
+                    else:
+                        font_size = int(font_size_str)
+                else:
+                    font_size = int(font_size_str)
+            except (ValueError, TypeError):
+                font_size = 12  # Fallback to default size
+        
+        # Create base font configuration
+        base_font = (font_family, font_size)
+        
+        if font_weight == 'bold':
+            base_font = (font_family, font_size, 'bold')
+        if font_style == 'italic':
+            if len(base_font) == 2:
+                base_font = (font_family, font_size, 'italic')
+            else:
+                base_font = (font_family, font_size, 'bold italic')
+                
+        # Add underline for links
+        if len(base_font) == 2:
+            link_font = (base_font[0], base_font[1], 'underline')
+        else:
+            link_font = (base_font[0], base_font[1], base_font[2] + ' underline')
+        
+        # Get link text
+        link_text = ""
+        if hasattr(layout_box.element, 'text_content'):
+            link_text = layout_box.element.text_content
+        elif hasattr(layout_box.element, 'textContent'):
+            link_text = layout_box.element.textContent
+        elif hasattr(layout_box.element, 'text'):
+            link_text = layout_box.element.text
+            
+        # If no text content, try to get from child nodes
+        if not link_text or not link_text.strip():
+            link_text = self._extract_text_content(layout_box.element)
+            
+        if not link_text or not link_text.strip():
+            link_text = href  # Use href as fallback text
+            
+        # Link color
+        link_color = self.colors.get('link', '#0000EE')
+        
+        # Render link text
+        link_item = self.canvas.create_text(
+            x, y,
+            text=link_text,
+            font=link_font,
+            fill=link_color,
+            anchor="nw"
         )
-        self.canvas_items.append(clickable_area)
+        self.canvas_items.append(link_item)
         
-        # Bind click event to the area
-        self.canvas.tag_bind(clickable_area, '<Button-1>', lambda event, url=href: self._on_link_click(event, url))
-        
-        # Change cursor to hand when hovering over the link
-        self.canvas.tag_bind(clickable_area, '<Enter>', lambda event: self.canvas.config(cursor='hand2'))
-        self.canvas.tag_bind(clickable_area, '<Leave>', lambda event: self.canvas.config(cursor=''))
+        # Get actual text dimensions
+        bbox = self.canvas.bbox(link_item)
+        if bbox:
+            actual_width = bbox[2] - bbox[0]
+            actual_height = bbox[3] - bbox[1]
+            
+            # Make link clickable
+            clickable_area = self.canvas.create_rectangle(
+                x, y, 
+                x + actual_width, y + actual_height,
+                fill='',
+                outline='',
+                tags=('link', href)
+            )
+            self.canvas_items.append(clickable_area)
+            
+            # Bind click event
+            self.canvas.tag_bind(clickable_area, '<Button-1>', 
+                                 lambda event, url=href: self._on_link_click(event, url))
+            self.canvas.tag_bind(clickable_area, '<Enter>', 
+                                 lambda event: self.canvas.config(cursor='hand2'))
+            self.canvas.tag_bind(clickable_area, '<Leave>', 
+                                 lambda event: self.canvas.config(cursor=''))
     
     def _on_link_click(self, event, url: str) -> None:
         """
@@ -3058,22 +3169,34 @@ class HTML5Renderer:
             # Mark element as processed
             self.processed_nodes.add(element_id)
             
-            # Check if this is a paragraph that might contain inline links
-            if hasattr(element, 'tag_name') and element.tag_name.lower() in ('p', 'div', 'span') and hasattr(element, 'child_nodes'):
-                # Check if paragraph contains mixed content with links
+            # Special handling for link elements - always use paragraph-style rendering
+            if hasattr(element, 'tag_name') and element.tag_name.lower() == 'a':
+                logger.debug(f"Using paragraph-style rendering for link element: {element.tag_name}")
+                # Create a temporary paragraph-like layout box to render this link
+                self._render_paragraph_with_links(layout_box)
+                return
+            
+            # Check if this is a container that might contain inline links
+            if hasattr(element, 'tag_name') and element.tag_name.lower() in ('p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li') and hasattr(element, 'child_nodes'):
+                # Check if container has links or other inline elements
                 has_links = False
                 has_text = False
+                has_other_inline = False
                 
                 for child in element.child_nodes:
-                    if hasattr(child, 'tag_name') and child.tag_name.lower() == 'a':
-                        has_links = True
+                    if hasattr(child, 'tag_name'):
+                        tag = child.tag_name.lower()
+                        if tag == 'a':
+                            has_links = True
+                        elif tag in ('span', 'em', 'strong', 'b', 'i', 'u', 'code', 'small', 'big', 'sub', 'sup'):
+                            has_other_inline = True
                     elif hasattr(child, 'node_type') and child.node_type == 3:  # Text node
                         if hasattr(child, 'node_value') and child.node_value and child.node_value.strip():
                             has_text = True
                 
-                if has_links and has_text:
-                    # This is a paragraph with inline links - use special rendering
-                    logger.debug(f"Using special paragraph with links rendering for {element.tag_name}")
+                # Use paragraph-style rendering for mixed content or whenever there's a link
+                if has_links:  # Simplified condition - always use paragraph style if there are links
+                    logger.debug(f"Using paragraph-style rendering for content with links in {element.tag_name}")
                     self._render_paragraph_with_links(layout_box)
                     return
             
@@ -3187,7 +3310,22 @@ class HTML5Renderer:
         """
         try:
             element = layout_box.element
-            logger.debug(f"Rendering paragraph with links: {element.tag_name}")
+            if not element:
+                return
+                
+            # Create a unique identifier for this element
+            element_id = f"{id(element)}"
+            
+            # Skip if the element has already been processed
+            if element_id in self.processed_rendered_paragraphs:
+                logger.debug(f"Skipping already rendered paragraph with links: {element_id}")
+                return
+                
+            # Mark this paragraph as being rendered (to avoid duplicate rendering of child links)
+            self.in_progress_paragraphs.add(element_id)
+            
+            element_tag = element.tag_name.lower() if hasattr(element, 'tag_name') else 'unknown'
+            logger.debug(f"Rendering with paragraph-style links: {element_tag}")
             
             # Get paragraph position and dimensions
             x = layout_box.box_metrics.x + layout_box.box_metrics.padding_left + layout_box.box_metrics.border_left_width
@@ -3254,12 +3392,117 @@ class HTML5Renderer:
             max_width = available_width if available_width else self.viewport_width - x - 20
             current_line_width = 0
             
-            # Process mixed content
-            for child in element.child_nodes:
+            # Special handling for standalone link elements
+            if element_tag == 'a':
+                # Mark this link as processed
+                self.processed_nodes.add(element_id)
+                
+                href = element.get_attribute('href') if hasattr(element, 'get_attribute') else None
+                if href:
+                    # Get link text
+                    link_text = ""
+                    if hasattr(element, 'text_content'):
+                        link_text = element.text_content
+                    elif hasattr(element, 'textContent'):
+                        link_text = element.textContent
+                    elif hasattr(element, 'text'):
+                        link_text = element.text
+                        
+                    # If no text content, try to get from child nodes
+                    if not link_text or not link_text.strip():
+                        link_text = self._extract_text_content(element)
+                        
+                    if not link_text or not link_text.strip():
+                        link_text = href  # Use href as fallback text
+                    
+                    # Create font for link (with underline)
+                    link_font = base_font
+                    if len(link_font) == 2:
+                        link_font = (link_font[0], link_font[1], 'underline')
+                    else:
+                        link_font = (link_font[0], link_font[1], link_font[2] + ' underline')
+                    
+                    # Link color
+                    link_color = self.colors.get('link', '#0000EE')
+                    
+                    # Render link text
+                    link_item = self.canvas.create_text(
+                        current_x, current_y,
+                        text=link_text,
+                        font=link_font,
+                        fill=link_color,
+                        anchor="nw"
+                    )
+                    self.canvas_items.append(link_item)
+                    
+                    # Get actual text dimensions
+                    bbox = self.canvas.bbox(link_item)
+                    if bbox:
+                        actual_width = bbox[2] - bbox[0]
+                        actual_height = bbox[3] - bbox[1]
+                        
+                        # Make link clickable
+                        clickable_area = self.canvas.create_rectangle(
+                            current_x, current_y, 
+                            current_x + actual_width, current_y + actual_height,
+                            fill='',
+                            outline='',
+                            tags=('link', href)
+                        )
+                        self.canvas_items.append(clickable_area)
+                        
+                        # Bind click event
+                        self.canvas.tag_bind(clickable_area, '<Button-1>', 
+                                            lambda event, url=href: self._on_link_click(event, url))
+                        self.canvas.tag_bind(clickable_area, '<Enter>', 
+                                            lambda event: self.canvas.config(cursor='hand2'))
+                        self.canvas.tag_bind(clickable_area, '<Leave>', 
+                                            lambda event: self.canvas.config(cursor=''))
+                        
+                        # Update the layout box content height
+                        layout_box.box_metrics.content_height = max(layout_box.box_metrics.content_height, actual_height)
+                
+                # Mark paragraph as fully rendered
+                self.processed_rendered_paragraphs.add(element_id)
+                # Remove from in-progress tracking
+                if element_id in self.in_progress_paragraphs:
+                    self.in_progress_paragraphs.remove(element_id)
+                return
+            
+            # Set to keep track of rendered link IDs within this paragraph
+            rendered_links = set()
+            
+            # Process mixed content for container elements
+            for child in element.child_nodes if hasattr(element, 'child_nodes') else []:
                 # Handle link elements
                 if hasattr(child, 'tag_name') and child.tag_name.lower() == 'a':
+                    # Create a unique ID for this link
+                    link_id = f"{id(child)}"
+                    
+                    # Skip if this link has already been rendered
+                    if link_id in rendered_links:
+                        logger.debug(f"Skipping already rendered link in paragraph: {link_id}")
+                        continue
+                    
+                    # Mark this link as rendered within this paragraph
+                    rendered_links.add(link_id)
+                    
+                    # Mark the link as processed globally
+                    self.processed_nodes.add(link_id)
+                    
                     # Get link text and href
-                    link_text = child.text_content if hasattr(child, 'text_content') else ""
+                    link_text = ""
+                    if hasattr(child, 'text_content'):
+                        link_text = child.text_content
+                    elif hasattr(child, 'textContent'):
+                        link_text = child.textContent
+                    elif hasattr(child, 'text'):
+                        link_text = child.text
+                    
+                    # If no direct text, try to extract from child nodes
+                    if not link_text or not link_text.strip():
+                        link_text = self._extract_text_content(child)
+                    
                     href = child.get_attribute('href') if hasattr(child, 'get_attribute') else ""
                     
                     logger.debug(f"Rendering link in paragraph: {link_text} -> {href}")
@@ -3267,9 +3510,43 @@ class HTML5Renderer:
                     if not link_text.strip():
                         continue
                     
+                    # Get the link's computed style if available
+                    link_style = getattr(child, 'computed_style', {}) if hasattr(child, 'computed_style') else {}
+                    
+                    # Use link-specific font if available
+                    link_font = base_font
+                    
+                    # Apply specific styling from the link if available
+                    link_font_family = link_style.get('font-family', font_family)
+                    link_font_size_str = link_style.get('font-size', str(font_size))
+                    link_font_weight = link_style.get('font-weight', font_weight)
+                    link_font_style = link_style.get('font-style', font_style)
+                    
+                    # Convert link font size to integer
+                    try:
+                        if isinstance(link_font_size_str, str):
+                            if link_font_size_str.endswith('px'):
+                                link_font_size = int(link_font_size_str[:-2])
+                            else:
+                                link_font_size = int(link_font_size_str)
+                        else:
+                            link_font_size = int(link_font_size_str)
+                    except (ValueError, TypeError):
+                        link_font_size = font_size  # Use parent font size as fallback
+                    
+                    # Build link font
+                    link_font = (link_font_family, link_font_size)
+                    
+                    if link_font_weight == 'bold':
+                        link_font = (link_font_family, link_font_size, 'bold')
+                    if link_font_style == 'italic':
+                        if len(link_font) == 2:
+                            link_font = (link_font_family, link_font_size, 'italic')
+                        else:
+                            link_font = (link_font_family, link_font_size, 'bold italic')
+                    
                     # Estimate text width (rough approximation)
-                    # For precise measurement, we would need to create and measure temporary text
-                    char_width = font_size * 0.6  # Average character width
+                    char_width = link_font_size * 0.6  # Average character width
                     text_width = len(link_text) * char_width
                     
                     # Check if we need to wrap to next line
@@ -3278,9 +3555,11 @@ class HTML5Renderer:
                         current_y += line_height
                         current_line_width = 0
                     
-                    # Create link text
+                    # Create link color
                     link_color = self.colors.get('link', '#0000EE')
-                    link_font = base_font
+                    # Use link's specified color if available
+                    if 'color' in link_style:
+                        link_color = link_style.get('color')
                     
                     # Add underline for links
                     if len(link_font) == 2:
@@ -3376,15 +3655,77 @@ class HTML5Renderer:
                 # Handle other inline elements
                 elif hasattr(child, 'tag_name'):
                     # Handle other inline elements by rendering them at the current position
-                    # This could be improved to handle more types of inline elements properly
                     tag_name = child.tag_name.lower()
-                    text = child.text_content if hasattr(child, 'text_content') else ""
+                    
+                    # Get text from this inline element
+                    text = ""
+                    if hasattr(child, 'text_content'):
+                        text = child.text_content
+                    elif hasattr(child, 'textContent'):
+                        text = child.textContent
+                    elif hasattr(child, 'text'):
+                        text = child.text
+                    
+                    # If no direct text, try to extract from child nodes
+                    if not text or not text.strip():
+                        text = self._extract_text_content(child)
                     
                     if not text.strip():
                         continue
                     
+                    # Get element's computed style if available
+                    elem_style = getattr(child, 'computed_style', {}) if hasattr(child, 'computed_style') else {}
+                    
+                    # Create specific font for this inline element
+                    inline_font = base_font
+                    
+                    # Apply element-specific styling
+                    inline_font_family = elem_style.get('font-family', font_family)
+                    inline_font_size_str = elem_style.get('font-size', str(font_size))
+                    inline_font_weight = elem_style.get('font-weight', font_weight)
+                    inline_font_style = elem_style.get('font-style', font_style)
+                    
+                    # Convert inline font size to integer
+                    try:
+                        if isinstance(inline_font_size_str, str):
+                            if inline_font_size_str.endswith('px'):
+                                inline_font_size = int(inline_font_size_str[:-2])
+                            else:
+                                inline_font_size = int(inline_font_size_str)
+                        else:
+                            inline_font_size = int(inline_font_size_str)
+                    except (ValueError, TypeError):
+                        inline_font_size = font_size  # Use parent font size as fallback
+                    
+                    # Build inline element font
+                    inline_font = (inline_font_family, inline_font_size)
+                    
+                    # Apply specific styling for known tags
+                    if tag_name in ('b', 'strong'):
+                        inline_font = (inline_font_family, inline_font_size, 'bold')
+                    elif tag_name in ('i', 'em'):
+                        inline_font = (inline_font_family, inline_font_size, 'italic')
+                    elif tag_name == 'u':
+                        if len(inline_font) == 2:
+                            inline_font = (inline_font_family, inline_font_size, 'underline')
+                        else:
+                            inline_font = (inline_font_family, inline_font_size, inline_font[2] + ' underline')
+                    
+                    # Apply combined styling
+                    if inline_font_weight == 'bold' and 'bold' not in str(inline_font):
+                        if len(inline_font) == 2:
+                            inline_font = (inline_font_family, inline_font_size, 'bold')
+                        else:
+                            inline_font = (inline_font_family, inline_font_size, 'bold ' + inline_font[2])
+                    
+                    if inline_font_style == 'italic' and 'italic' not in str(inline_font):
+                        if len(inline_font) == 2:
+                            inline_font = (inline_font_family, inline_font_size, 'italic')
+                        else:
+                            inline_font = (inline_font_family, inline_font_size, inline_font[2] + ' italic')
+                    
                     # Estimate text width
-                    char_width = font_size * 0.6
+                    char_width = inline_font_size * 0.6
                     text_width = len(text) * char_width
                     
                     # Check if we need to wrap to next line
@@ -3393,12 +3734,17 @@ class HTML5Renderer:
                         current_y += line_height
                         current_line_width = 0
                     
+                    # Get text color
+                    text_color = default_color
+                    if 'color' in elem_style:
+                        text_color = elem_style.get('color')
+                    
                     # Create text item
                     text_item = self.canvas.create_text(
                         current_x, current_y,
                         text=text,
-                        font=base_font,
-                        fill=default_color,
+                        font=inline_font,
+                        fill=text_color,
                         anchor="nw"
                     )
                     self.canvas_items.append(text_item)
@@ -3422,10 +3768,19 @@ class HTML5Renderer:
             total_height = current_y + line_height - y
             layout_box.box_metrics.content_height = max(layout_box.box_metrics.content_height, total_height)
             
+            # Mark paragraph as completely rendered
+            self.processed_rendered_paragraphs.add(element_id)
+            # Remove from in-progress tracking
+            if element_id in self.in_progress_paragraphs:
+                self.in_progress_paragraphs.remove(element_id)
+            
         except Exception as e:
             logger.error(f"Error rendering paragraph with links: {e}")
             # Fallback to standard text rendering if there was an error
             self._render_regular_text_content(layout_box)
+            # Make sure to remove from in-progress tracking
+            if element_id in self.in_progress_paragraphs:
+                self.in_progress_paragraphs.remove(element_id)
     
     def _render_regular_text_content(self, layout_box):
         """
