@@ -771,8 +771,8 @@ class BrowserWindow:
             "About Wink Browser",
             "Wink Browser\n"
             "A modern privacy-focused web browser\n"
-            "Version 0.1.0\n\n"
-            "© 2023 Wink Browser Project"
+            "Version 0.1.1\n\n"
+            "© 2025 Wink Browser Team/Sneed Group"
         )
     
     def _close(self) -> None:

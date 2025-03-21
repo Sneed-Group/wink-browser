@@ -16,8 +16,8 @@ from browser_engine.utils.logging import setup_logging, get_default_log_file
 logger = setup_logging(log_file=get_default_log_file())
 
 # Package information
-__version__ = "0.1.0"
-__author__ = "Wink Browser Team"
-__description__ = "A modern, privacy-focused web browser engine in Python"
+__version__ = "0.1.1"
+__author__ = "Wink Browser Team (Division of Sneed Group)"
+__description__ = "A modern, minimalistic, lightweight, privacy-focused web browser engine in Python"
 
 logger.info(f"Wink Browser Engine v{__version__} initialized") 

@@ -200,7 +200,7 @@ class HTML5Engine:
                 </head>
                 <body>
                     <h1>Browser Information</h1>
-                    <div class="info"><span class="label">Version:</span> 0.1.0</div>
+                    <div class="info"><span class="label">Version:</span> 0.1.1</div>
                     <div class="info"><span class="label">Python:</span> {sys.version}</div>
                     <div class="info"><span class="label">Platform:</span> {platform.platform()}</div>
                 </body>

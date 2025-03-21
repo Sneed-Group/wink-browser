@@ -236,7 +236,7 @@ class HTML5Engine:
             <head><title>Browser Version</title></head>
             <body>
                 <h1>Wink Browser Engine</h1>
-                <p>Version: 0.1.0</p>
+                <p>Version: 0.1.1</p>
                 <p>Python: {sys.version}</p>
                 <p>Platform: {platform.platform()}</p>
             </body>
