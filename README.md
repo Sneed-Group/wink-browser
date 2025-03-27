@@ -10,7 +10,7 @@ A modern, privacy-focused web browser built in Python.
 - **Lightweight**: Efficient resource usage compared to mainstream browsers
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 - **Extension Support**: Support for securely sandboxed browser extensions
-- **Brand New Browser Engine**: Not anu existing browser engine of any kind.
+- **Brand New Browser Engine**: Not any existing browser engine of any kind.
 - **Freedom from big tech**: No influence from big tech.
 
 ## Components
